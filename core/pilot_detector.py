@@ -1,10 +1,11 @@
-﻿import os
+import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 from thefuzz import fuzz
-from core.audio_extractor import extract_audio
+from core.audio_extractor import extract_audio, get_video_duration
 from core.transcriber import SIVTranscriber, TranscriptionSegment
+from core.timeline_merger import VideoTranscriptionCache
 
 @dataclass
 class VideoPilotMatch:
@@ -13,6 +14,12 @@ class VideoPilotMatch:
     detected_pilot: str
     confidence: float
     matched_phrases: List[str]
+    duration: float = 0.0
+    segments: List[TranscriptionSegment] = None
+
+    def __post_init__(self):
+        if self.segments is None:
+            self.segments = []
 
 class PilotDetector:
     def __init__(self, pilots_list: Optional[List[str]] = None, transcriber: Optional[SIVTranscriber] = None):
@@ -20,34 +27,51 @@ class PilotDetector:
         pilots_list: elenco dei nomi o nomi e cognomi dei piloti attesi.
         """
         self.pilots_list = [p.strip() for p in pilots_list] if pilots_list else []
-        self.transcriber = transcriber or SIVTranscriber(model_size="base")
+        self.transcriber = transcriber or SIVTranscriber(model_size="small")
 
     def set_pilots_list(self, pilots: List[str]):
         self.pilots_list = [p.strip() for p in pilots if p.strip()]
 
     def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp") -> VideoPilotMatch:
         """
-        Estrae i primi minuti dell'audio del video, trascrive e cerca riferimenti ai piloti.
+        Estrae l'audio, calcola la durata, trascrive una sola volta (salvando in cache) e identifica il pilota.
         """
         os.makedirs(temp_dir, exist_ok=True)
         fname = os.path.basename(video_path)
         base_name = os.path.splitext(fname)[0]
-        wav_path = os.path.join(temp_dir, f"{base_name}_pilot_check.wav")
+        cache_file = os.path.join(temp_dir, f"{base_name}_cache.json")
         
-        # Estrai audio
-        extract_audio(video_path, wav_path)
-        
-        # Trascrivi con Whisper
-        segments = self.transcriber.transcribe(wav_path, language="it")
-        
-        # Pulisci file audio temporaneo
-        if os.path.exists(wav_path):
-            try:
-                os.remove(wav_path)
-            except Exception:
-                pass
+        # 1. Controlla se la trascrizione è già in cache su disco
+        cached = VideoTranscriptionCache.load(cache_file)
+        if cached:
+            duration = cached.duration
+            segments = cached.segments
+        else:
+            wav_path = os.path.join(temp_dir, f"{base_name}_audio.wav")
+            extract_audio(video_path, wav_path)
+            duration = get_video_duration(video_path)
+            segments = self.transcriber.transcribe(wav_path, language="it")
+            
+            # Salva in cache
+            new_cache = VideoTranscriptionCache(
+                video_path=video_path,
+                filename=fname,
+                duration=duration,
+                segments=segments
+            )
+            new_cache.save(cache_file)
+            
+            # Pulisci file audio temporaneo
+            if os.path.exists(wav_path):
+                try:
+                    os.remove(wav_path)
+                except Exception:
+                    pass
 
-        return self.match_pilot_from_segments(video_path, segments)
+        match = self.match_pilot_from_segments(video_path, segments)
+        match.duration = duration
+        match.segments = segments
+        return match
 
     def match_pilot_from_segments(self, video_path: str, segments: List[TranscriptionSegment]) -> VideoPilotMatch:
         fname = os.path.basename(video_path)

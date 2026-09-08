@@ -1,4 +1,4 @@
-﻿import os
+import os
 import glob
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -13,6 +13,7 @@ from core.pilot_detector import PilotDetector, VideoPilotMatch
 from core.file_sorter import FileSorter
 from core.video_concatenator import VideoConcatenator
 from core.maneuver_detector import ManeuverDetector
+from core.timeline_merger import VideoTranscriptionCache, merge_transcriptions_with_offset
 from ui.step1_sort_dialog import SorterApprovalDialog
 from ui.step3_chapters_view import ChaptersView
 
@@ -236,8 +237,11 @@ class MainWindow(QMainWindow):
                 progress_sig.emit(f"Concatenazione video per pilota: {pilot}...", int((i / total) * 100))
                 # Ordina i file cronologicamente
                 sorted_files = sorted(files, key=lambda f: os.path.getmtime(f))
+                # Salva il video montato in una sottocartella dedicata 'montati'
                 pilot_folder = os.path.join(out_dir, pilot)
-                merged_output = os.path.join(pilot_folder, f"{pilot}_Corso_SIV_Montato.mp4")
+                montati_folder = os.path.join(pilot_folder, "montati")
+                os.makedirs(montati_folder, exist_ok=True)
+                merged_output = os.path.join(montati_folder, f"{pilot}_Corso_SIV_Montato.mp4")
                 concatenator.concatenate_videos(sorted_files, merged_output)
                 concatenated_videos[pilot] = merged_output
             progress_sig.emit("Concatenazione completata per tutti i piloti!", 100)
@@ -272,7 +276,38 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
+        # 1. Verifica se possiamo ricomporre la trascrizione istantaneamente dalla cache (One-Pass)
+        pilot_matches_map = {m.filename: m for m in self.detected_matches}
+
         def task(progress_sig):
+            # Cerca i file originali che compongono questo pilota
+            matched_caches = []
+            if hasattr(self, 'sorted_folders'):
+                for pilot, files in self.sorted_folders.items():
+                    if f"{pilot}_Corso_SIV_Montato" in os.path.basename(vpath):
+                        sorted_files = sorted(files, key=lambda f: os.path.getmtime(f))
+                        for sf in sorted_files:
+                            fname = os.path.basename(sf)
+                            if fname in pilot_matches_map and pilot_matches_map[fname].segments:
+                                m = pilot_matches_map[fname]
+                                c = VideoTranscriptionCache(
+                                    video_path=sf,
+                                    filename=fname,
+                                    duration=m.duration,
+                                    segments=m.segments
+                                )
+                                matched_caches.append(c)
+                        break
+
+            if matched_caches:
+                progress_sig.emit("Ricomposizione istantanea trascrizione con offset temporali...", 50)
+                segments = merge_transcriptions_with_offset(matched_caches)
+                progress_sig.emit("Riconoscimento manovre SIV (istantaneo da cache)...", 85)
+                chapters = self.maneuver_detector.detect_chapters(segments)
+                progress_sig.emit("Capitoli generati istantaneamente!", 100)
+                return chapters
+
+            # Fallback nel caso di caricamento video manuale non presente in cache
             progress_sig.emit("Estrazione traccia audio completa...", 10)
             wav_path = os.path.join("temp", "merged_analysis.wav")
             extract_audio(vpath, wav_path)
