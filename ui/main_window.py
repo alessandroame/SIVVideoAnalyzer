@@ -80,7 +80,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
-        # Wizard Step Header / Stepper indicator
+        # Wizard Step Header / Stepper indicator a 4 FASI
         self.header_frame = QFrame()
         self.header_frame.setStyleSheet("""
             QFrame {
@@ -97,15 +97,18 @@ class MainWindow(QMainWindow):
         h_layout = QHBoxLayout(self.header_frame)
         h_layout.setContentsMargins(15, 5, 15, 5)
 
-        self.lbl_step1 = QLabel("1. Configurazione & Riconoscimento")
-        self.lbl_step2 = QLabel("2. Revisione & Assegnazione per Volo")
-        self.lbl_step3 = QLabel("3. Debriefing Didattico & Player Voli")
+        self.lbl_step1 = QLabel("1. Parametri")
+        self.lbl_step2 = QLabel("2. Analisi Video")
+        self.lbl_step3 = QLabel("3. Revisione Voli")
+        self.lbl_step4 = QLabel("4. Debriefing")
 
         h_layout.addWidget(self.lbl_step1)
         h_layout.addWidget(QLabel(" ➔ "))
         h_layout.addWidget(self.lbl_step2)
         h_layout.addWidget(QLabel(" ➔ "))
         h_layout.addWidget(self.lbl_step3)
+        h_layout.addWidget(QLabel(" ➔ "))
+        h_layout.addWidget(self.lbl_step4)
         h_layout.addStretch()
 
         btn_open_replay = QPushButton("📂 Apri Sessione Esistente (Replay)")
@@ -126,76 +129,43 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.header_frame)
 
-        # Stacked Widget per le 3 pagine del Wizard
+        # Stacked Widget per le 4 pagine del Wizard
         self.stacked_widget = QStackedWidget()
         main_layout.addWidget(self.stacked_widget)
 
-        # Step 1: Configurazione & Analisi
+        # Step 1: Acquisizione Parametri
         self.step1_widget = QWidget()
         self.init_step1_widget()
         self.stacked_widget.addWidget(self.step1_widget)
 
-        # Step 2: Tabella Revisione a Schermo Intero (con Voli)
-        self.step2_widget = Step2ReviewView()
-        self.step2_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
-        self.step2_widget.back_signal.connect(lambda: self.go_to_step(0))
-        self.stacked_widget.addWidget(self.step2_widget)
+        # Step 2: Analisi Video (Nuova Pagina Dedicata)
+        self.step2_analysis_widget = QWidget()
+        self.init_step2_analysis_widget()
+        self.stacked_widget.addWidget(self.step2_analysis_widget)
 
-        # Step 3: Hub Debriefing & Player Voli
-        self.step3_widget = ChaptersView()
-        self.step3_widget.pilot_selected_signal.connect(self.on_hub_pilot_selected)
-        self.step3_widget.flight_selected_signal.connect(self.on_hub_flight_selected)
-        self.step3_widget.save_changes_signal.connect(self.save_flight_changes)
-        self.step3_widget.back_signal.connect(lambda: self.go_to_step(1))
+        # Step 3: Tabella Revisione a Schermo Intero (con Voli)
+        self.step3_widget = Step2ReviewView()
+        self.step3_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
+        self.step3_widget.back_signal.connect(lambda: self.go_to_step(0))
         self.stacked_widget.addWidget(self.step3_widget)
 
-        # Barra di avanzamento e stato globale con pulsante di interruzione (in basso)
+        # Step 4: Hub Debriefing & Player Voli
+        self.step4_widget = ChaptersView()
+        self.step4_widget.pilot_selected_signal.connect(self.on_hub_pilot_selected)
+        self.step4_widget.flight_selected_signal.connect(self.on_hub_flight_selected)
+        self.step4_widget.save_changes_signal.connect(self.save_flight_changes)
+        self.step4_widget.back_signal.connect(lambda: self.go_to_step(2))
+        self.stacked_widget.addWidget(self.step4_widget)
+
+        # Barra di stato discreta in basso (solo per messaggi generali)
         self.status_box = QHBoxLayout()
         self.status_box.setContentsMargins(4, 4, 4, 4)
         self.status_label = QLabel("Pronto.")
-        self.status_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #e2e8f0;")
+        self.status_label.setStyleSheet("font-size: 12px; color: #94a3b8;")
         self.status_box.addWidget(self.status_label, stretch=1)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #475569;
-                border-radius: 5px;
-                text-align: center;
-                height: 24px;
-                font-size: 13px;
-                font-weight: bold;
-                color: #ffffff;
-                background-color: #0f172a;
-            }
-            QProgressBar::chunk {
-                background-color: #0284c7;
-                border-radius: 4px;
-            }
-        """)
-        self.status_box.addWidget(self.progress_bar, stretch=2)
-
-        self.btn_cancel_task = QPushButton("⏹ Interrompi")
-        self.btn_cancel_task.setVisible(False)
-        self.btn_cancel_task.setStyleSheet("""
-            QPushButton {
-                background-color: #dc2626; 
-                color: white; 
-                font-weight: bold; 
-                font-size: 13px;
-                padding: 6px 16px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #b91c1c;
-            }
-        """)
-        self.btn_cancel_task.clicked.connect(self.cancel_current_task)
-        self.status_box.addWidget(self.btn_cancel_task)
-
         main_layout.addLayout(self.status_box)
+
+        self.go_to_step(0)
 
         self.go_to_step(0)
 
@@ -206,6 +176,7 @@ class MainWindow(QMainWindow):
         self.lbl_step1.setStyleSheet(active_style if current_step == 0 else inactive_style)
         self.lbl_step2.setStyleSheet(active_style if current_step == 1 else inactive_style)
         self.lbl_step3.setStyleSheet(active_style if current_step == 2 else inactive_style)
+        self.lbl_step4.setStyleSheet(active_style if current_step == 3 else inactive_style)
 
     def go_to_step(self, step_idx: int):
         self.stacked_widget.setCurrentIndex(step_idx)
@@ -213,8 +184,8 @@ class MainWindow(QMainWindow):
 
     def init_step1_widget(self):
         layout = QVBoxLayout(self.step1_widget)
-        layout.setSpacing(12)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(14)
+        layout.setContentsMargins(15, 15, 15, 15)
 
         # Selezione Cartella Sorgente Video
         box_input = QGroupBox("1. Dove si trovano i video del SIV? (Scheda SD o Cartella)")
@@ -222,16 +193,16 @@ class MainWindow(QMainWindow):
         l_in = QHBoxLayout(box_input)
         self.txt_source_dir = QLineEdit()
         self.txt_source_dir.setPlaceholderText("Es. E:\\ o D:\\Video SIV...")
-        self.txt_source_dir.setStyleSheet("padding: 6px; font-size: 13px;")
+        self.txt_source_dir.setStyleSheet("padding: 8px; font-size: 13px;")
         l_in.addWidget(self.txt_source_dir)
         btn_browse_src = QPushButton("Sfoglia Cartella...")
-        btn_browse_src.setStyleSheet("padding: 6px 14px; font-size: 13px;")
+        btn_browse_src.setStyleSheet("padding: 8px 16px; font-size: 13px; font-weight: 500;")
         btn_browse_src.clicked.connect(self.browse_source_dir)
         l_in.addWidget(btn_browse_src)
         layout.addWidget(box_input)
 
         # Gestione Piloti del Corso con Modello Vela e Colori
-        box_pilots = QGroupBox("2. Piloti del Corso (Nome e Colore della Vela per facilitare il debriefing)")
+        box_pilots = QGroupBox("2. Piloti del Corso (Nome e Colore Vela per facilitare il debriefing)")
         box_pilots.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; }")
         l_pilots = QVBoxLayout(box_pilots)
 
@@ -240,24 +211,23 @@ class MainWindow(QMainWindow):
         self.table_pilots.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table_pilots.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table_pilots.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table_pilots.setMaximumHeight(140)
         self.table_pilots.setStyleSheet("font-size: 13px;")
         l_pilots.addWidget(self.table_pilots)
 
         pilot_btn_layout = QHBoxLayout()
         btn_add_p = QPushButton("➕ Aggiungi Pilota")
-        btn_add_p.setStyleSheet("padding: 5px 12px; font-size: 13px;")
+        btn_add_p.setStyleSheet("padding: 6px 14px; font-size: 13px;")
         btn_add_p.clicked.connect(self.add_pilot_row)
         pilot_btn_layout.addWidget(btn_add_p)
 
         btn_del_p = QPushButton("➖ Rimuovi Selezionato")
-        btn_del_p.setStyleSheet("padding: 5px 12px; font-size: 13px;")
+        btn_del_p.setStyleSheet("padding: 6px 14px; font-size: 13px;")
         btn_del_p.clicked.connect(self.remove_pilot_row)
         pilot_btn_layout.addWidget(btn_del_p)
         pilot_btn_layout.addStretch()
 
         l_pilots.addLayout(pilot_btn_layout)
-        layout.addWidget(box_pilots)
+        layout.addWidget(box_pilots, stretch=1)
 
         # Cartella di Output e Modalità Modello Whisper (Compatti e Chiari)
         row_config = QHBoxLayout()
@@ -267,10 +237,10 @@ class MainWindow(QMainWindow):
         l_out = QHBoxLayout(box_output)
         self.txt_output_dir = QLineEdit()
         self.txt_output_dir.setText(os.path.abspath("output_siv"))
-        self.txt_output_dir.setStyleSheet("padding: 6px; font-size: 13px;")
+        self.txt_output_dir.setStyleSheet("padding: 8px; font-size: 13px;")
         l_out.addWidget(self.txt_output_dir)
         btn_browse_out = QPushButton("Sfoglia...")
-        btn_browse_out.setStyleSheet("padding: 6px 14px; font-size: 13px;")
+        btn_browse_out.setStyleSheet("padding: 8px 16px; font-size: 13px;")
         btn_browse_out.clicked.connect(self.browse_output_dir)
         l_out.addWidget(btn_browse_out)
         row_config.addWidget(box_output, stretch=3)
@@ -281,28 +251,11 @@ class MainWindow(QMainWindow):
         self.combo_model = QComboBox()
         self.combo_model.addItem("⚡ Ultra Rapida (Consigliata tra i voli)", "base")
         self.combo_model.addItem("🎯 Approfondita (Per fine giornata)", "small")
-        self.combo_model.setStyleSheet("padding: 6px; font-size: 13px;")
+        self.combo_model.setStyleSheet("padding: 8px; font-size: 13px;")
         l_model.addWidget(self.combo_model)
         row_config.addWidget(box_model, stretch=2)
 
         layout.addLayout(row_config)
-
-        # Log eventi pulito e compatto
-        layout.addWidget(QLabel("<b>Avanzamento Operazioni:</b>"))
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(110)
-        self.log_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #0f172a;
-                color: #38bdf8;
-                font-family: Consolas, monospace;
-                font-size: 12px;
-                border-radius: 4px;
-                padding: 6px;
-            }
-        """)
-        layout.addWidget(self.log_text)
 
         # Pulsante di Azione Primario e Gestione Cache
         btn_action_layout = QHBoxLayout()
@@ -342,6 +295,120 @@ class MainWindow(QMainWindow):
         btn_action_layout.addWidget(self.btn_detect_pilots, stretch=1)
 
         layout.addLayout(btn_action_layout)
+
+    def init_step2_analysis_widget(self):
+        """Nuova Schermata Dedicata: Monitoraggio Analisi a Stress Zero"""
+        layout = QVBoxLayout(self.step2_analysis_widget)
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Scheda Riepilogo Impostazioni di Lancio
+        self.card_analysis_config = QFrame()
+        self.card_analysis_config.setStyleSheet("""
+            QFrame {
+                background-color: #1e293b;
+                border-radius: 8px;
+                padding: 14px 18px;
+                border: 1px solid #334155;
+            }
+            QLabel {
+                color: #f8fafc;
+                font-size: 13px;
+            }
+        """)
+        l_card = QVBoxLayout(self.card_analysis_config)
+        self.lbl_analysis_title = QLabel("<h3 style='margin:0; color:#38bdf8;'>⚙ Analisi Video in Corso...</h3>")
+        self.lbl_analysis_summary = QLabel("Configurazione: Inizializzazione...")
+        self.lbl_analysis_summary.setStyleSheet("color: #cbd5e1; font-size: 13px; margin-top: 4px;")
+        l_card.addWidget(self.lbl_analysis_title)
+        l_card.addWidget(self.lbl_analysis_summary)
+        layout.addWidget(self.card_analysis_config)
+
+        # Sezione Centrale: Mega Progress Bar & Stato
+        progress_box = QFrame()
+        progress_box.setStyleSheet("""
+            QFrame {
+                background-color: #0f172a;
+                border-radius: 8px;
+                padding: 18px;
+                border: 1px solid #334155;
+            }
+        """)
+        l_prog = QVBoxLayout(progress_box)
+        l_prog.setSpacing(10)
+
+        self.lbl_analysis_task = QLabel("Inizio scansione file video...")
+        self.lbl_analysis_task.setStyleSheet("font-size: 15px; font-weight: bold; color: #f1f5f9;")
+        l_prog.addWidget(self.lbl_analysis_task)
+
+        self.analysis_progress_bar = QProgressBar()
+        self.analysis_progress_bar.setValue(0)
+        self.analysis_progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #475569;
+                border-radius: 6px;
+                text-align: center;
+                height: 32px;
+                font-size: 14px;
+                font-weight: bold;
+                color: #ffffff;
+                background-color: #1e293b;
+            }
+            QProgressBar::chunk {
+                background-color: #0284c7;
+                border-radius: 5px;
+            }
+        """)
+        l_prog.addWidget(self.analysis_progress_bar)
+
+        self.lbl_analysis_eta = QLabel("⏱ Calcolo tempo residuo...")
+        self.lbl_analysis_eta.setStyleSheet("font-size: 13px; color: #38bdf8; font-weight: bold;")
+        l_prog.addWidget(self.lbl_analysis_eta)
+
+        layout.addWidget(progress_box)
+
+        # Log Eventi Rilevati (Solo ciò che conta)
+        lbl_log = QLabel("<b>Manovre e Piloti Riconosciuti durante l'ascolto radio:</b>")
+        lbl_log.setStyleSheet("font-size: 13px; color: #cbd5e1;")
+        layout.addWidget(lbl_log)
+
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #090d16;
+                color: #e2e8f0;
+                font-family: Consolas, monospace;
+                font-size: 13px;
+                border-radius: 6px;
+                border: 1px solid #1e293b;
+                padding: 10px;
+            }
+        """)
+        layout.addWidget(self.log_text, stretch=1)
+
+        # Pulsante di Interruzione in Basso
+        bottom_bar = QHBoxLayout()
+        bottom_bar.addStretch()
+
+        self.btn_cancel_task = QPushButton("⏹ Interrompi Analisi")
+        self.btn_cancel_task.setStyleSheet("""
+            QPushButton {
+                background-color: #dc2626; 
+                color: white; 
+                font-weight: bold; 
+                font-size: 14px;
+                padding: 10px 24px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #b91c1c;
+            }
+        """)
+        self.btn_cancel_task.clicked.connect(self.cancel_current_task)
+        bottom_bar.addWidget(self.btn_cancel_task)
+
+        layout.addLayout(bottom_bar)
 
     def add_pilot_row(self, nome="", vela="", colore=""):
         row = self.table_pilots.rowCount()
@@ -527,10 +594,21 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nessun video", "Nessun file video trovato nella cartella specificata (inclusi formati Sony .MTS/.MXF/MP4).")
             return
 
-        # Mostra nel log la configurazione essenziale con cui è stata lanciata
+        # Configura il riepilogo nella pagina di Analisi (Step 2)
         mode_name = self.combo_model.currentText()
-        self.log(f"<b>▶ Avvio Analisi:</b> {len(video_files)} clip trovate | Modalità: <i>{mode_name}</i>")
-        self.log(f"<b>Piloti monitorati:</b> {', '.join(pilot_names) if pilot_names else 'Tutti (Rilevamento automatico)'}")
+        summary_text = (
+            f"<b>Sorgente:</b> {src} &nbsp;|&nbsp; <b>Clip trovate:</b> {len(video_files)}<br>"
+            f"<b>Modalità:</b> {mode_name} &nbsp;|&nbsp; <b>Piloti:</b> {', '.join(pilot_names) if pilot_names else 'Tutti'}"
+        )
+        self.lbl_analysis_summary.setText(summary_text)
+        self.lbl_analysis_task.setText("Preparazione trascrizione audio...")
+        self.lbl_analysis_eta.setText("⏱ Calcolo tempo residuo...")
+        self.analysis_progress_bar.setValue(0)
+        self.log_text.clear()
+        self.btn_cancel_task.setEnabled(True)
+
+        # Transizione automatica alla pagina di Analisi (Step 2)
+        self.go_to_step(1)
 
         def task(progress_sig, is_cancelled):
             detector = PilotDetector(pilots_list=pilot_names, transcriber=self.transcriber)
@@ -629,39 +707,42 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-            self.status_label.setText("Interruzione in corso...")
+            self.lbl_analysis_task.setText("Interruzione in corso...")
             self.btn_cancel_task.setEnabled(False)
             self.worker.request_cancel()
 
     def on_task_cancelled(self):
-        self.progress_bar.setVisible(False)
-        self.btn_cancel_task.setVisible(False)
         self.btn_cancel_task.setEnabled(True)
         self.btn_detect_pilots.setEnabled(True)
-        self.status_label.setText("Elaborazione interrotta dall'utente.")
+        self.lbl_analysis_task.setText("Elaborazione interrotta dall'utente.")
         self.log("<b>Elaborazione interrotta dall'utente.</b>")
+        # Riporta allo Step 1 (Parametri)
+        self.go_to_step(0)
 
     def on_progress(self, msg, val):
         if msg.startswith("→"):
             # È un evento chiave (pilota riconosciuto): lo stampiamo nel log
             self.log(msg)
         else:
-            # È lo stato del progresso: lo mostriamo nella status label
-            self.status_label.setText(msg)
-        self.progress_bar.setValue(val)
+            # È lo stato del progresso: lo mostriamo nella label di task ed estraiamo l'ETA
+            if " | " in msg:
+                task_part, eta_part = msg.split(" | ", 1)
+                self.lbl_analysis_task.setText(task_part)
+                self.lbl_analysis_eta.setText(eta_part)
+            else:
+                self.lbl_analysis_task.setText(msg)
+        self.analysis_progress_bar.setValue(val)
 
     def on_pilots_detected(self, matches):
-        self.progress_bar.setVisible(False)
-        self.btn_cancel_task.setVisible(False)
         self.btn_detect_pilots.setEnabled(True)
         self.detected_matches = matches
 
         pilot_names = [p.nome for p in self.pilots_info]
 
-        # Passa allo Step 2 (Schermata Revisione con Voli)
-        self.step2_widget.set_data(matches, pilots_list=pilot_names)
-        self.go_to_step(1)
-        self.status_label.setText("Verifica piloti e numeri di volo, poi clicca 'Conferma ed Entra nel Debriefing'.")
+        # Passa allo Step 3 (Schermata Revisione con Voli)
+        self.step3_widget.set_data(matches, pilots_list=pilot_names)
+        self.go_to_step(2)
+        self.status_label.setText("Verifica piloti e numeri di volo, poi clicca 'Entra nel Debriefing'.")
 
     def on_review_confirmed_enter_debriefing(self):
         """
@@ -735,8 +816,8 @@ class MainWindow(QMainWindow):
                 display_pilots.append((p_name, p_name))
 
         first_pilot = pilots_with_flights[0]
-        self.step3_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
-        self.go_to_step(2)
+        self.step4_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
+        self.go_to_step(3)
         self.load_pilot_flights_into_hub(first_pilot)
 
     def on_hub_pilot_selected(self, pilot_name: str):
@@ -747,7 +828,7 @@ class MainWindow(QMainWindow):
         for f in flights:
             if f.flight_number == flight_number:
                 self.current_flight = f
-                self.step3_widget.load_flight(f)
+                self.step4_widget.load_flight(f)
                 self.status_label.setText(f"Caricato Volo {f.flight_number} di '{self.current_pilot}' ({len(f.clips)} clip, {len(f.chapters)} manovre).")
                 break
 
@@ -755,12 +836,12 @@ class MainWindow(QMainWindow):
         self.current_pilot = pilot_name
         flights = self.pilot_flights.get(pilot_name, [])
         if not flights:
-            self.step3_widget.set_flights_list([])
+            self.step4_widget.set_flights_list([])
             return
 
-        self.step3_widget.set_flights_list(flights, current_flight_number=flights[0].flight_number)
+        self.step4_widget.set_flights_list(flights, current_flight_number=flights[0].flight_number)
         self.current_flight = flights[0]
-        self.step3_widget.load_flight(flights[0])
+        self.step4_widget.load_flight(flights[0])
         self.status_label.setText(f"Caricato Volo {flights[0].flight_number} di '{pilot_name}'.")
 
     def save_flight_changes(self):
@@ -768,9 +849,9 @@ class MainWindow(QMainWindow):
             return
 
         # Sincronizza i capitoli dalla tabella
-        table = self.step3_widget.table_chapters
+        table = self.step4_widget.table_chapters
         for row in range(table.rowCount()):
-            name_item = table.item(row, 2)
+            name_item = table.item(row, 1)
             if name_item and row < len(self.current_flight.chapters):
                 self.current_flight.chapters[row].maneuver_name = name_item.text().strip()
 
@@ -829,8 +910,8 @@ class MainWindow(QMainWindow):
                 display_pilots.append((p_name, p_name))
 
         first_pilot = pilots_with_flights[0]
-        self.step3_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
-        self.go_to_step(2)
+        self.step4_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
+        self.go_to_step(3)
         self.load_pilot_flights_into_hub(first_pilot)
         self.status_label.setText(f"Sessione caricata in Pure Replay da: {d}")
 
