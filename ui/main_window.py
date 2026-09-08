@@ -22,6 +22,7 @@ from ui.step3_chapters_view import ChaptersView
 
 class WorkerThread(QThread):
     progress_signal = pyqtSignal(str, int)
+    clip_analyzed_signal = pyqtSignal(object) # Emette il VideoPilotMatch appena analizzato
     finished_signal = pyqtSignal(object)
     error_signal = pyqtSignal(str)
     cancelled_signal = pyqtSignal()
@@ -41,7 +42,7 @@ class WorkerThread(QThread):
 
     def run(self):
         try:
-            res = self.task_fn(self.progress_signal, self.is_cancelled, *self.args, **self.kwargs)
+            res = self.task_fn(self.progress_signal, self.clip_analyzed_signal, self.is_cancelled, *self.args, **self.kwargs)
             if self._is_cancelled:
                 self.cancelled_signal.emit()
             else:
@@ -146,7 +147,7 @@ class MainWindow(QMainWindow):
         # Step 3: Tabella Revisione a Schermo Intero (con Voli)
         self.step3_widget = Step2ReviewView()
         self.step3_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
-        self.step3_widget.back_signal.connect(lambda: self.go_to_step(0))
+        self.step3_widget.back_signal.connect(self.on_review_back_clicked)
         self.stacked_widget.addWidget(self.step3_widget)
 
         # Step 4: Hub Debriefing & Player Voli
@@ -387,9 +388,8 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(self.log_text, stretch=1)
 
-        # Pulsante di Interruzione in Basso
+        # Pulsanti in Basso: Interrompi o Passa subito a Revisione
         bottom_bar = QHBoxLayout()
-        bottom_bar.addStretch()
 
         self.btn_cancel_task = QPushButton("⏹ Interrompi Analisi")
         self.btn_cancel_task.setStyleSheet("""
@@ -397,8 +397,8 @@ class MainWindow(QMainWindow):
                 background-color: #dc2626; 
                 color: white; 
                 font-weight: bold; 
-                font-size: 14px;
-                padding: 10px 24px;
+                font-size: 13px;
+                padding: 10px 20px;
                 border-radius: 6px;
             }
             QPushButton:hover {
@@ -407,6 +407,25 @@ class MainWindow(QMainWindow):
         """)
         self.btn_cancel_task.clicked.connect(self.cancel_current_task)
         bottom_bar.addWidget(self.btn_cancel_task)
+
+        bottom_bar.addStretch()
+
+        self.btn_view_review_now = QPushButton("📋 Vedi Tabella Revisione (0 clip) ➡")
+        self.btn_view_review_now.setStyleSheet("""
+            QPushButton {
+                background-color: #0f766e; 
+                color: white; 
+                font-weight: bold; 
+                font-size: 14px;
+                padding: 10px 22px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #115e59;
+            }
+        """)
+        self.btn_view_review_now.clicked.connect(lambda: self.go_to_step(2))
+        bottom_bar.addWidget(self.btn_view_review_now)
 
         layout.addLayout(bottom_bar)
 
@@ -610,12 +629,20 @@ class MainWindow(QMainWindow):
         # Transizione automatica alla pagina di Analisi (Step 2)
         self.go_to_step(1)
 
-        def task(progress_sig, is_cancelled):
+        # Reset della tabella di Revisione (Step 3) per accogliere le clip in tempo reale
+        self.step3_widget.reset_data(pilots_list=pilot_names)
+
+        def task(progress_sig, clip_sig, is_cancelled):
+            from core.audio_extractor import get_video_creation_time
             detector = PilotDetector(pilots_list=pilot_names, transcriber=self.transcriber)
             matches = []
             total = len(video_files)
             start_wall_time = time.time()
             last_eta_str = ""
+
+            # Tracciamento dinamico per il calcolo progressivo del volo di ciascun pilota
+            pilot_last_flight = {} # pilot -> ultimo flight_number
+            pilot_last_time = {}   # pilot -> ultimo creation_time + duration
 
             for i, vf in enumerate(video_files):
                 if is_cancelled():
@@ -662,27 +689,40 @@ class MainWindow(QMainWindow):
                 )
                 if is_cancelled():
                     return matches
+
+                # Calcolo del Numero di Volo per questa clip
+                p = m.detected_pilot
+                curr_t = get_video_creation_time(vf)
+                prev_t = pilot_last_time.get(p, 0.0)
+                prev_f = pilot_last_flight.get(p, 0)
+
+                if m.flight_number is not None:
+                    # Riconosciuto da chiamata radio esplicita
+                    f_num = m.flight_number
+                else:
+                    if prev_f == 0:
+                        f_num = 1
+                    else:
+                        gap = max(0.0, curr_t - prev_t) if prev_t > 0 else 9999.0
+                        if gap > 1200.0:  # > 20 min -> Nuovo volo
+                            f_num = prev_f + 1
+                        else:             # <= 20 min -> Stesso volo (multi-clip)
+                            f_num = prev_f
+
+                m.flight_number = f_num
+                pilot_last_flight[p] = f_num
+                pilot_last_time[p] = curr_t + m.duration
+
                 matches.append(m)
 
-                # Notifica nel log l'avvenuto riconoscimento del pilota
-                detected_str = f"→ {fname}: Riconosciuto <b>{m.detected_pilot}</b>"
+                # Emette la clip analizzata in TEMPO REALE verso la UI di revisione
+                clip_sig.emit(m)
+
+                # Notifica nel log l'avvenuto riconoscimento del pilota e del volo
+                detected_str = f"→ {fname}: Riconosciuto <b>{m.detected_pilot}</b> (Volo {f_num})"
                 if m.matched_phrases:
-                    detected_str += f" (radio: <i>'{m.matched_phrases[0]}'</i>)"
+                    detected_str += f" - radio: <i>'{m.matched_phrases[0]}'</i>"
                 progress_sig.emit(detected_str, int((i + 1) / total * 100.0))
-
-            # Raggruppa provvisoriamente per numero di volo per ciascun pilota
-            pilot_map = {}
-            for m in matches:
-                pilot_map.setdefault(m.detected_pilot, []).append(m)
-
-            grouper = FlightGrouper()
-            for p, p_matches in pilot_map.items():
-                p_flights = grouper.group_pilot_matches_into_flights(p, p_matches)
-                for f in p_flights:
-                    clip_fnames = {c.filename for c in f.clips}
-                    for m in p_matches:
-                        if m.filename in clip_fnames:
-                            m.flight_number = f.flight_number
 
             total_elapsed = int(time.time() - start_wall_time)
             progress_sig.emit(f"Riconoscimento completato in {total_elapsed // 60:02d}m {total_elapsed % 60:02d}s!", 100)
@@ -690,10 +730,17 @@ class MainWindow(QMainWindow):
 
         self.worker = WorkerThread(task)
         self.worker.progress_signal.connect(self.on_progress)
+        self.worker.clip_analyzed_signal.connect(self.on_clip_analyzed_live)
         self.worker.finished_signal.connect(self.on_pilots_detected)
         self.worker.cancelled_signal.connect(self.on_task_cancelled)
         self.worker.error_signal.connect(self.on_error)
         self.worker.start()
+
+    def on_clip_analyzed_live(self, match):
+        """Riceve in tempo reale ogni clip appena analizzata e la inserisce subito nella tabella di Revisione."""
+        self.step3_widget.add_clip_match(match)
+        count = self.step3_widget.table.rowCount()
+        self.btn_view_review_now.setText(f"📋 Vedi Tabella Revisione ({count} clip pronte) ➡")
 
     def cancel_current_task(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
@@ -735,14 +782,17 @@ class MainWindow(QMainWindow):
 
     def on_pilots_detected(self, matches):
         self.btn_detect_pilots.setEnabled(True)
-        self.detected_matches = matches
-
-        pilot_names = [p.nome for p in self.pilots_info]
-
-        # Passa allo Step 3 (Schermata Revisione con Voli)
-        self.step3_widget.set_data(matches, pilots_list=pilot_names)
+        self.detected_matches = self.step3_widget.matches if self.step3_widget.matches else matches
+        # Passa allo Step 3 (Revisione Voli)
         self.go_to_step(2)
-        self.status_label.setText("Verifica piloti e numeri di volo, poi clicca 'Entra nel Debriefing'.")
+        self.status_label.setText("Tutte le clip sono state analizzate. Verifica e clicca 'Entra nel Debriefing'.")
+
+    def on_review_back_clicked(self):
+        """Se l'analisi è ancora in corso, torna alla schermata di analisi; altrimenti torna ai parametri."""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.go_to_step(1)
+        else:
+            self.go_to_step(0)
 
     def on_review_confirmed_enter_debriefing(self):
         """

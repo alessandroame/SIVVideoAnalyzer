@@ -15,6 +15,7 @@ class VideoPilotMatch:
     confidence: float
     matched_phrases: List[str]
     duration: float = 0.0
+    flight_number: Optional[int] = None
     segments: List[TranscriptionSegment] = None
 
     def __post_init__(self):
@@ -131,6 +132,29 @@ class PilotDetector:
                     candidate_scores[pilot] += 1.0
                     matched_phrases[pilot].append(f"[{seg.start:.1f}s] \"{seg.text}\"")
 
+        # 3. Riconoscimento vocale radio del NUMERO DI VOLO
+        # Cerca pattern tipo: "primo volo", "volo uno", "secondo volo", "volo 2", "terzo volo", ecc.
+        detected_flight_num = None
+        flight_patterns = [
+            (r"\b(?:primo|1°|uno)\s+volo\b|\bvolo\s+(?:uno|1|1°)\b", 1),
+            (r"\b(?:secondo|2°|due)\s+volo\b|\bvolo\s+(?:due|2|2°)\b", 2),
+            (r"\b(?:terzo|3°|tre)\s+volo\b|\bvolo\s+(?:tre|3|3°)\b", 3),
+            (r"\b(?:quarto|4°|quattro)\s+volo\b|\bvolo\s+(?:quattro|4|4°)\b", 4),
+            (r"\b(?:quinto|5°|cinque)\s+volo\b|\bvolo\s+(?:cinque|5|5°)\b", 5),
+            (r"\b(?:sesto|6°|sei)\s+volo\b|\bvolo\s+(?:sei|6|6°)\b", 6),
+            (r"\b(?:settimo|7°|sette)\s+volo\b|\bvolo\s+(?:sette|7|7°)\b", 7),
+            (r"\b(?:ottavo|8°|otto)\s+volo\b|\bvolo\s+(?:otto|8|8°)\b", 8),
+        ]
+
+        for seg in segments:
+            txt_low = seg.text.lower()
+            for pattern, f_num in flight_patterns:
+                if re.search(pattern, txt_low):
+                    detected_flight_num = f_num
+                    break
+            if detected_flight_num:
+                break
+
         # Trova il pilota con il punteggio più alto
         best_pilot = "Da Assegnare"
         highest_score = 0.0
@@ -149,5 +173,6 @@ class PilotDetector:
             filename=fname,
             detected_pilot=best_pilot,
             confidence=confidence,
-            matched_phrases=best_phrases[:3]
+            matched_phrases=best_phrases[:3],
+            flight_number=detected_flight_num
         )

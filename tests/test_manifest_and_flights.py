@@ -1,4 +1,4 @@
-﻿import os
+import os
 import shutil
 import tempfile
 import pytest
@@ -55,3 +55,39 @@ def test_flight_multi_clip_offsets():
     c, loc_t = flight.get_clip_and_local_time(200.0)
     assert c.filename == "c2.mp4"
     assert loc_t == 20.0  # 200 - 180
+
+def test_radio_flight_detection():
+    from core.pilot_detector import PilotDetector
+    detector = PilotDetector(pilots_list=["Mario", "Luigi"])
+    
+    # Simula segmenti audio con chiamata "Mario, secondo volo"
+    segments = [
+        TranscriptionSegment(start=1.0, end=4.0, text="Ok Mario mi ricevi, pronto per il secondo volo?"),
+        TranscriptionSegment(start=5.0, end=8.0, text="Fai un beccheggio e poi asimmetrica")
+    ]
+    match = detector.match_pilot_from_segments("dummy.mp4", segments)
+    assert match.detected_pilot == "Mario"
+    assert match.flight_number == 2
+
+    # Chiamata con "primo volo"
+    segments_1 = [
+        TranscriptionSegment(start=1.0, end=4.0, text="Luigi volo uno, chiudi la destra")
+    ]
+    match_1 = detector.match_pilot_from_segments("dummy2.mp4", segments_1)
+    assert match_1.detected_pilot == "Luigi"
+    assert match_1.flight_number == 1
+
+def test_flight_grouper_with_radio_flights():
+    grouper = FlightGrouper(time_gap_threshold_seconds=1200.0)
+    
+    matches = [
+        VideoPilotMatch(video_path="/v1.mp4", filename="v1.mp4", detected_pilot="Mario", confidence=1.0, matched_phrases=[], duration=100.0, flight_number=1),
+        VideoPilotMatch(video_path="/v2.mp4", filename="v2.mp4", detected_pilot="Mario", confidence=1.0, matched_phrases=[], duration=120.0, flight_number=1),
+        VideoPilotMatch(video_path="/v3.mp4", filename="v3.mp4", detected_pilot="Mario", confidence=1.0, matched_phrases=[], duration=150.0, flight_number=2)
+    ]
+    flights = grouper.group_pilot_matches_into_flights("Mario", matches)
+    assert len(flights) == 2
+    assert flights[0].flight_number == 1
+    assert len(flights[0].clips) == 2
+    assert flights[1].flight_number == 2
+    assert len(flights[1].clips) == 1

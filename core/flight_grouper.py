@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional
@@ -143,10 +143,14 @@ class FlightGrouper:
         if not matches:
             return []
 
-        # Ordina cronologicamente in base al timestamp di modifica del file
+        from core.audio_extractor import get_video_creation_time
+        from core.timeline_merger import VideoTranscriptionCache, merge_transcriptions_with_offset
+        from core.maneuver_detector import ManeuverDetector
+
+        # Ordina cronologicamente in base al timestamp di creazione reale
         def get_file_time(m):
             try:
-                return os.path.getmtime(m.video_path)
+                return get_video_creation_time(m.video_path)
             except Exception:
                 return 0.0
 
@@ -163,8 +167,15 @@ class FlightGrouper:
             t_curr = get_file_time(curr_m)
             gap = max(0.0, t_curr - t_prev)
 
-            if gap > self.time_gap_threshold_seconds:
-                # Salto temporale importante -> Nuovo volo
+            # Se curr_m specifica esplicitamente un numero di volo diverso dal precedente
+            has_explicit_different_flight = (
+                curr_m.flight_number is not None and 
+                prev_m.flight_number is not None and 
+                curr_m.flight_number != prev_m.flight_number
+            )
+
+            if gap > self.time_gap_threshold_seconds or has_explicit_different_flight:
+                # Salto temporale importante o chiamata radio con volo differente -> Nuovo volo
                 flight_groups.append(current_group)
                 current_group = [curr_m]
             else:
@@ -174,13 +185,17 @@ class FlightGrouper:
         if current_group:
             flight_groups.append(current_group)
 
-        # Costruisci gli oggetti SIVFlight
-        from core.timeline_merger import VideoTranscriptionCache, merge_transcriptions_with_offset
-        from core.maneuver_detector import ManeuverDetector
         detector = ManeuverDetector()
-
         siv_flights: List[SIVFlight] = []
         for f_idx, grp in enumerate(flight_groups, start=1):
+            # Se nel gruppo c'è un numero di volo rilevato esplicitamente dalla radio, usa quello come f_num
+            explicit_f_num = None
+            for m in grp:
+                if m.flight_number:
+                    explicit_f_num = m.flight_number
+                    break
+            effective_flight_num = explicit_f_num if explicit_f_num is not None else f_idx
+
             clips = []
             caches = []
             for m in grp:
@@ -204,8 +219,8 @@ class FlightGrouper:
             chapters = detector.detect_chapters(merged_segments) if merged_segments else []
 
             flight = SIVFlight(
-                flight_number=f_idx,
-                flight_id=f"Volo_{f_idx:02d}",
+                flight_number=effective_flight_num,
+                flight_id=f"Volo_{effective_flight_num:02d}",
                 pilot_name=pilot_name,
                 clips=clips,
                 segments=merged_segments,

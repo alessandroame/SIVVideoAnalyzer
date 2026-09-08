@@ -95,43 +95,57 @@ class Step2ReviewView(QWidget):
 
         layout.addLayout(btn_layout)
 
-    def set_data(self, matches, pilots_list=None):
-        self.matches = matches
+    def reset_data(self, pilots_list=None):
+        """Pulisce la tabella all'avvio di una nuova analisi per accogliere le clip in streaming."""
+        self.matches = []
         self.pilots_list = list(pilots_list or [])
         if "Da Assegnare" not in self.pilots_list:
             self.pilots_list.append("Da Assegnare")
+        self.table.setRowCount(0)
 
-        self.table.setRowCount(len(matches))
-        for row, match in enumerate(matches):
-            # Colonna 0: File sorgente
-            file_item = QTableWidgetItem(match.filename)
-            file_item.setFlags(file_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 0, file_item)
+    def add_clip_match(self, match):
+        """Aggiunge in tempo reale una clip appena analizzata alla tabella di revisione."""
+        self.matches.append(match)
+        row = self.table.rowCount()
+        self.table.insertRow(row)
 
-            # Colonna 1: ComboBox Pilota (più comodo da selezionare)
-            combo = QComboBox()
-            combo.setStyleSheet("font-size: 14px; padding: 4px;")
-            all_pilots = list(dict.fromkeys(self.pilots_list + [match.detected_pilot]))
-            combo.addItems(all_pilots)
-            idx = combo.findText(match.detected_pilot)
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
-            combo.setEditable(True)
-            self.table.setCellWidget(row, 1, combo)
+        # Colonna 0: File sorgente
+        file_item = QTableWidgetItem(match.filename)
+        file_item.setFlags(file_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, 0, file_item)
 
-            # Colonna 2: SpinBox Numero di Volo
-            spin_volo = QSpinBox()
-            spin_volo.setRange(1, 99)
-            flight_num = getattr(match, 'flight_number', 1) or 1
-            spin_volo.setValue(flight_num)
-            spin_volo.setStyleSheet("padding: 4px; font-size: 14px; font-weight: bold;")
-            self.table.setCellWidget(row, 2, spin_volo)
+        # Colonna 1: ComboBox Pilota
+        combo = QComboBox()
+        combo.setStyleSheet("font-size: 14px; padding: 4px;")
+        all_pilots = list(dict.fromkeys(self.pilots_list + [match.detected_pilot]))
+        combo.addItems(all_pilots)
+        idx = combo.findText(match.detected_pilot)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.setEditable(True)
+        self.table.setCellWidget(row, 1, combo)
 
-            # Colonna 3: Frasi Rilevate (chiamata radio)
-            phrases_text = " | ".join(match.matched_phrases) if match.matched_phrases else "—"
-            phrases_item = QTableWidgetItem(phrases_text)
-            phrases_item.setFlags(phrases_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 3, phrases_item)
+        # Colonna 2: SpinBox Numero di Volo
+        spin_volo = QSpinBox()
+        spin_volo.setRange(1, 99)
+        flight_num = getattr(match, 'flight_number', 1) or 1
+        spin_volo.setValue(flight_num)
+        spin_volo.setStyleSheet("padding: 4px; font-size: 14px; font-weight: bold;")
+        self.table.setCellWidget(row, 2, spin_volo)
+
+        # Colonna 3: Frasi Rilevate (chiamata radio)
+        phrases_text = " | ".join(match.matched_phrases) if match.matched_phrases else "—"
+        phrases_item = QTableWidgetItem(phrases_text)
+        phrases_item.setFlags(phrases_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, 3, phrases_item)
+
+        # Scrolla automaticamente sull'ultima riga aggiunta
+        self.table.scrollToBottom()
+
+    def set_data(self, matches, pilots_list=None):
+        self.reset_data(pilots_list)
+        for m in matches:
+            self.add_clip_match(m)
 
     def on_confirm(self):
         for row, match in enumerate(self.matches):
