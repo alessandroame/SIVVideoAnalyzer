@@ -1,0 +1,121 @@
+{
+  "maneuvers": [
+    {
+      "id": "asimmetrica_destra",
+      "name": "Chiusura Asimmetrica Destra",
+      "keywords": [
+        "asimmetrica a destra", "chiudi a destra", "destra tira", "chiudi destra",
+        "asimmetrica destra", "prendi la destra", "tira la destra", "abbatti la destra"
+      ],
+      "category": "Asimmetriche"
+    },
+    {
+      "id": "asimmetrica_sinistra",
+      "name": "Chiusura Asimmetrica Sinistra",
+      "keywords": [
+        "asimmetrica a sinistra", "chiudi a sinistra", "sinistra tira", "chiudi sinistra",
+        "asimmetrica sinistra", "prendi la sinistra", "tira la sinistra", "abbatti la sinistra"
+      ],
+      "category": "Asimmetriche"
+    },
+    {
+      "id": "asimmetrica_accelerata",
+      "name": "Asimmetrica con Acceleratore",
+      "keywords": [
+        "spingi la barra e chiudi", "accelera e chiudi", "speed e asimmetrica", "con acceleratore chiudi"
+      ],
+      "category": "Asimmetriche"
+    },
+    {
+      "id": "frontale",
+      "name": "Chiusura Frontale",
+      "keywords": [
+        "frontale", "chiudi frontale", "tira le a", "tira le due a", "prendi le a", "chiudi al centro"
+      ],
+      "category": "Frontali"
+    },
+    {
+      "id": "orecchie",
+      "name": "Grandi Orecchie",
+      "keywords": [
+        "fai le orecchie", "prendi le orecchie", "grandi orecchie", "orecchie fuori", "tira le esterne"
+      ],
+      "category": "Discesa Rapida"
+    },
+    {
+      "id": "spirale",
+      "name": "Spirale Picchiata / Vite",
+      "keywords": [
+        "entra in vite", "vite picchiata", "spirale", "butta dentro in spirale", "chiudi il raggio", "accelera in vite"
+      ],
+      "category": "Spirale"
+    },
+    {
+      "id": "uscita_spirale",
+      "name": "Uscita da Spirale",
+      "keywords": [
+        "esci dalla vite", "dissipa", "uscita progressiva", "lascia scorrere", "frena il beccheggio"
+      ],
+      "category": "Spirale"
+    },
+    {
+      "id": "wingover",
+      "name": "Wingover / Rollio",
+      "keywords": [
+        "wingover", "inversione di rollio", "rollio", "carica a destra", "inverto", "scambia il peso"
+      ],
+      "category": "Dinamica"
+    },
+    {
+      "id": "delfinaggio",
+      "name": "Delfinaggio / Pitching",
+      "keywords": [
+        "delfinaggio", "beccheggio", "lascia picchiare", "frena quando passa davanti", "controlla il tuffo"
+      ],
+      "category": "Dinamica"
+    },
+    {
+      "id": "b_stall",
+      "name": "B-Stall",
+      "keywords": [
+        "stallo di b", "b-stall", "tira le b", "prendi le b", "mantieni le b", "rilascia le b"
+      ],
+      "category": "Stalli"
+    },
+    {
+      "id": "full_stall",
+      "name": "Full Stall / Stallo Pieno",
+      "keywords": [
+        "full stall", "stallo pieno", "tutto giù i freni", "sfonda i freni", "tieni giù", "cerca lo stallo"
+      ],
+      "category": "Stalli"
+    },
+    {
+      "id": "backfly",
+      "name": "Backfly / Cerca la Retrocessione",
+      "keywords": [
+        "backfly", "porta in backfly", "fai respirare la vela", "cerca il volo rovescio", "apri leggermente i freni"
+      ],
+      "category": "Stalli"
+    },
+    {
+      "id": "spin_negativa",
+      "name": "Spin / Negativa",
+      "keywords": [
+        "negativa", "spin", "stallo d'ala", "sfonda solo a destra", "sfonda solo a sinistra", "innesco negativa"
+      ],
+      "category": "Autorotazioni"
+    },
+    {
+      "id": "autorotazione",
+      "name": "Autorotazione Controllata",
+      "keywords": [
+        "autorotazione", "lascia ruotare", "blocca la rotazione", "contrasta col corpo"
+      ],
+      "category": "Autorotazioni"
+    }
+  ],
+  "callsigns": [
+    "mi ricevi", "sei pronto", "in box", "pronto per", "via", "adesso", "vai ora", "attenzione", "frena", "lascia"
+  ]
+}
