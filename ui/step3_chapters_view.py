@@ -41,8 +41,8 @@ class ChaptersView(QWidget):
         """)
         l_top = QHBoxLayout(top_bar)
 
-        self.btn_back = QPushButton("⬅ Torna a Revisione")
-        self.btn_back.setStyleSheet("padding: 6px 14px; font-size: 13px;")
+        self.btn_back = QPushButton("📋 Torna al Registro Voli")
+        self.btn_back.setStyleSheet("padding: 7px 16px; font-size: 13px; font-weight: bold;")
         self.btn_back.clicked.connect(self.back_signal.emit)
         l_top.addWidget(self.btn_back)
 

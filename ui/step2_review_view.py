@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 class Step2ReviewView(QWidget):
     confirmed_signal = pyqtSignal()
+    open_flight_signal = pyqtSignal(str, int) # (pilot_name, flight_number)
     back_signal = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -41,18 +42,20 @@ class Step2ReviewView(QWidget):
         l_info.addWidget(lbl_desc)
         layout.addWidget(info_box)
 
-        # Tabella Video Assegnati essenziale (meno colonne dispersive)
-        self.table = QTableWidget(0, 4)
+        # Tabella Video Assegnati essenziale con Azione Rapida
+        self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels([
             "File Video", 
             "Pilota", 
             "Volo N°",
-            "Chiamata Radio Riconosciuta"
+            "Chiamata Radio Riconosciuta",
+            "Debriefing"
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.setStyleSheet("""
             QTableWidget {
                 font-size: 14px;
@@ -139,8 +142,39 @@ class Step2ReviewView(QWidget):
         phrases_item.setFlags(phrases_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
         self.table.setItem(row, 3, phrases_item)
 
+        # Colonna 4: Pulsante rapido Guarda Ora
+        btn_watch = QPushButton("▶ Guarda Ora")
+        btn_watch.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7; 
+                color: white; 
+                font-weight: bold; 
+                padding: 4px 10px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+            }
+        """)
+        # Collega il click per salvare la selezione e aprire il debriefing di quel pilota e volo
+        btn_watch.clicked.connect(lambda _, r=row: self.on_watch_clicked(r))
+        self.table.setCellWidget(row, 4, btn_watch)
+
         # Scrolla automaticamente sull'ultima riga aggiunta
         self.table.scrollToBottom()
+
+    def on_watch_clicked(self, row: int):
+        # Aggiorna match correnti
+        combo = self.table.cellWidget(row, 1)
+        spin = self.table.cellWidget(row, 2)
+        if combo and row < len(self.matches):
+            self.matches[row].detected_pilot = combo.currentText().strip() or "Da Assegnare"
+        if spin and row < len(self.matches):
+            self.matches[row].flight_number = spin.value()
+        
+        pilot = self.matches[row].detected_pilot
+        f_num = self.matches[row].flight_number
+        self.open_flight_signal.emit(pilot, f_num)
 
     def set_data(self, matches, pilots_list=None):
         self.reset_data(pilots_list)

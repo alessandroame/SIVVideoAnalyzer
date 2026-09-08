@@ -81,44 +81,72 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
-        # Wizard Step Header / Stepper indicator a 4 FASI
+        # Header Superiore con Switch a Due Modalità (Registro Voli ↔ Aula Debriefing)
         self.header_frame = QFrame()
         self.header_frame.setStyleSheet("""
             QFrame {
-                background-color: #1e293b;
+                background-color: #0f172a;
                 border-radius: 8px;
-                padding: 10px;
-            }
-            QLabel {
-                color: #94a3b8;
-                font-size: 13px;
-                font-weight: bold;
+                padding: 6px 12px;
+                border: 1px solid #334155;
             }
         """)
         h_layout = QHBoxLayout(self.header_frame)
-        h_layout.setContentsMargins(15, 5, 15, 5)
+        h_layout.setContentsMargins(10, 4, 10, 4)
 
-        self.lbl_step1 = QLabel("1. Parametri")
-        self.lbl_step2 = QLabel("2. Analisi Video")
-        self.lbl_step3 = QLabel("3. Revisione Voli")
-        self.lbl_step4 = QLabel("4. Debriefing")
+        # Due grandi pulsanti di modalità
+        self.btn_tab_registry = QPushButton("📋 1. Registro Voli & Analisi")
+        self.btn_tab_registry.setCheckable(True)
+        self.btn_tab_registry.setChecked(True)
+        self.btn_tab_registry.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 8px 18px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+            }
+        """)
+        self.btn_tab_registry.clicked.connect(self.switch_to_registry_mode)
+        h_layout.addWidget(self.btn_tab_registry)
 
-        h_layout.addWidget(self.lbl_step1)
-        h_layout.addWidget(QLabel(" ➔ "))
-        h_layout.addWidget(self.lbl_step2)
-        h_layout.addWidget(QLabel(" ➔ "))
-        h_layout.addWidget(self.lbl_step3)
-        h_layout.addWidget(QLabel(" ➔ "))
-        h_layout.addWidget(self.lbl_step4)
+        self.btn_tab_debriefing = QPushButton("🎬 2. Aula Debriefing (Player)")
+        self.btn_tab_debriefing.setCheckable(True)
+        self.btn_tab_debriefing.setChecked(False)
+        self.btn_tab_debriefing.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #cbd5e1;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 8px 18px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #475569;
+            }
+        """)
+        self.btn_tab_debriefing.clicked.connect(self.switch_to_debriefing_mode)
+        h_layout.addWidget(self.btn_tab_debriefing)
+
+        # Indicatore compatto di stato background (se l'analisi è in corso mentre si guarda il debriefing)
+        self.lbl_bg_activity = QLabel("")
+        self.lbl_bg_activity.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 13px; margin-left: 15px;")
+        h_layout.addWidget(self.lbl_bg_activity)
+
         h_layout.addStretch()
 
-        btn_open_replay = QPushButton("📂 Apri Sessione Esistente (Replay)")
+        btn_open_replay = QPushButton("📂 Apri Sessione da USB (Replay)")
         btn_open_replay.setStyleSheet("""
             QPushButton {
                 background-color: #0f766e;
                 color: white;
                 font-weight: bold;
-                padding: 5px 12px;
+                padding: 7px 14px;
                 border-radius: 4px;
             }
             QPushButton:hover {
@@ -130,7 +158,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.header_frame)
 
-        # Stacked Widget per le 4 pagine del Wizard
+        # Stacked Widget per le 4 pagine
         self.stacked_widget = QStackedWidget()
         main_layout.addWidget(self.stacked_widget)
 
@@ -139,14 +167,15 @@ class MainWindow(QMainWindow):
         self.init_step1_widget()
         self.stacked_widget.addWidget(self.step1_widget)
 
-        # Step 2: Analisi Video (Nuova Pagina Dedicata)
+        # Step 2: Analisi Video (Schermata di dettaglio analisi)
         self.step2_analysis_widget = QWidget()
         self.init_step2_analysis_widget()
         self.stacked_widget.addWidget(self.step2_analysis_widget)
 
-        # Step 3: Tabella Revisione a Schermo Intero (con Voli)
+        # Step 3: Tabella Revisione / Registro Voli Completo
         self.step3_widget = Step2ReviewView()
         self.step3_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
+        self.step3_widget.open_flight_signal.connect(self.open_specific_flight_debriefing)
         self.step3_widget.back_signal.connect(self.on_review_back_clicked)
         self.stacked_widget.addWidget(self.step3_widget)
 
@@ -155,7 +184,7 @@ class MainWindow(QMainWindow):
         self.step4_widget.pilot_selected_signal.connect(self.on_hub_pilot_selected)
         self.step4_widget.flight_selected_signal.connect(self.on_hub_flight_selected)
         self.step4_widget.save_changes_signal.connect(self.save_flight_changes)
-        self.step4_widget.back_signal.connect(lambda: self.go_to_step(2))
+        self.step4_widget.back_signal.connect(self.switch_to_registry_mode)
         self.stacked_widget.addWidget(self.step4_widget)
 
         # Barra di stato discreta in basso (solo per messaggi generali)
@@ -168,20 +197,56 @@ class MainWindow(QMainWindow):
 
         self.go_to_step(0)
 
-        self.go_to_step(0)
+    def switch_to_registry_mode(self):
+        """Passa alla visualizzazione del Registro Voli (o Parametri se non sono ancora stati caricati video)."""
+        self.btn_tab_registry.setChecked(True)
+        self.btn_tab_debriefing.setChecked(False)
+        self.btn_tab_registry.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+        self.btn_tab_debriefing.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
 
-    def update_stepper_style(self, current_step: int):
-        active_style = "color: #38bdf8; font-weight: bold; text-decoration: underline;"
-        inactive_style = "color: #94a3b8; font-weight: normal;"
+        if self.step3_widget.table.rowCount() > 0:
+            self.stacked_widget.setCurrentIndex(2)
+        elif hasattr(self, 'worker') and self.worker.isRunning():
+            self.stacked_widget.setCurrentIndex(1)
+        else:
+            self.stacked_widget.setCurrentIndex(0)
 
-        self.lbl_step1.setStyleSheet(active_style if current_step == 0 else inactive_style)
-        self.lbl_step2.setStyleSheet(active_style if current_step == 1 else inactive_style)
-        self.lbl_step3.setStyleSheet(active_style if current_step == 2 else inactive_style)
-        self.lbl_step4.setStyleSheet(active_style if current_step == 3 else inactive_style)
+    def switch_to_debriefing_mode(self):
+        """Passa alla visualizzazione didattica dell'Aula Debriefing."""
+        # Se abbiamo almeno un pilota con voli, apri il debriefing
+        if self.step3_widget.table.rowCount() > 0 or self.pilot_flights:
+            self.on_review_confirmed_enter_debriefing()
+            self.btn_tab_registry.setChecked(False)
+            self.btn_tab_debriefing.setChecked(True)
+            self.btn_tab_debriefing.setStyleSheet("background-color: #16a34a; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+            self.btn_tab_registry.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+        else:
+            QMessageBox.information(self, "Nessun Video", "Avvia prima l'analisi dei video o apri una sessione per entrare nel debriefing.")
+
+    def open_specific_flight_debriefing(self, pilot_name: str, flight_number: int):
+        """Apre direttamente il debriefing focalizzandosi sul pilota e sul volo selezionati."""
+        self.on_review_confirmed_enter_debriefing()
+        self.btn_tab_registry.setChecked(False)
+        self.btn_tab_debriefing.setChecked(True)
+        self.btn_tab_debriefing.setStyleSheet("background-color: #16a34a; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+        self.btn_tab_registry.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+
+        # Seleziona pilota e volo specifici
+        self.load_pilot_flights_into_hub(pilot_name)
+        self.on_hub_flight_selected(flight_number)
 
     def go_to_step(self, step_idx: int):
         self.stacked_widget.setCurrentIndex(step_idx)
-        self.update_stepper_style(step_idx)
+        if step_idx in [0, 1, 2]:
+            self.btn_tab_registry.setChecked(True)
+            self.btn_tab_debriefing.setChecked(False)
+            self.btn_tab_registry.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+            self.btn_tab_debriefing.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+        elif step_idx == 3:
+            self.btn_tab_registry.setChecked(False)
+            self.btn_tab_debriefing.setChecked(True)
+            self.btn_tab_debriefing.setStyleSheet("background-color: #16a34a; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
+            self.btn_tab_registry.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
 
     def init_step1_widget(self):
         layout = QVBoxLayout(self.step1_widget)
@@ -759,6 +824,7 @@ class MainWindow(QMainWindow):
             self.worker.request_cancel()
 
     def on_task_cancelled(self):
+        self.lbl_bg_activity.setText("")
         self.btn_cancel_task.setEnabled(True)
         self.btn_detect_pilots.setEnabled(True)
         self.lbl_analysis_task.setText("Elaborazione interrotta dall'utente.")
@@ -776,16 +842,20 @@ class MainWindow(QMainWindow):
                 task_part, eta_part = msg.split(" | ", 1)
                 self.lbl_analysis_task.setText(task_part)
                 self.lbl_analysis_eta.setText(eta_part)
+                self.lbl_bg_activity.setText(f"⚙ {task_part} ({val}%)")
             else:
                 self.lbl_analysis_task.setText(msg)
+                self.lbl_bg_activity.setText(f"⚙ {msg} ({val}%)")
         self.analysis_progress_bar.setValue(val)
 
     def on_pilots_detected(self, matches):
+        self.lbl_bg_activity.setText("✅ Analisi completata")
         self.btn_detect_pilots.setEnabled(True)
         self.detected_matches = self.step3_widget.matches if self.step3_widget.matches else matches
-        # Passa allo Step 3 (Revisione Voli)
-        self.go_to_step(2)
-        self.status_label.setText("Tutte le clip sono state analizzate. Verifica e clicca 'Entra nel Debriefing'.")
+        # Passa allo Step 3 (Registro Voli) se l'utente non si trova già nell'Aula Debriefing
+        if self.stacked_widget.currentIndex() != 3:
+            self.go_to_step(2)
+        self.status_label.setText("Tutte le clip sono state analizzate. Puoi consultare il Registro Voli o entrare nell'Aula Debriefing.")
 
     def on_review_back_clicked(self):
         """Se l'analisi è ancora in corso, torna alla schermata di analisi; altrimenti torna ai parametri."""
