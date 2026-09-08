@@ -368,14 +368,25 @@ class MainWindow(QMainWindow):
         pilots_raw = self.txt_pilots.text().split(",")
         pilots = [p.strip() for p in pilots_raw if p.strip()]
 
-        exts = ["*.mp4", "*.mov", "*.avi", "*.mkv", "*.MP4", "*.MOV"]
+        # Supporto esteso formati video inclusi i formati Sony AVCHD (.MTS, .M2TS) e XAVC (.MXF, .MP4)
+        video_extensions = {
+            ".mp4", ".mov", ".avi", ".mkv", 
+            ".mts", ".m2ts", ".mxf", ".ts",
+            ".wmv", ".flv", ".webm"
+        }
+        
         video_files = []
-        for ext in exts:
-            video_files.extend(glob.glob(os.path.join(src, ext)))
-        video_files = list(set(video_files))
+        for root, _, files in os.walk(src):
+            for file in files:
+                ext = os.path.splitext(file)[1].lower()
+                if ext in video_extensions:
+                    video_files.append(os.path.join(root, file))
+
+        # Rimuovi duplicati e ordina
+        video_files = sorted(list(set(video_files)))
 
         if not video_files:
-            QMessageBox.warning(self, "Nessun video", "Nessun file video trovato nella cartella specificata.")
+            QMessageBox.warning(self, "Nessun video", "Nessun file video trovato nella cartella specificata (inclusi formati Sony .MTS/.MXF/MP4).")
             return
 
         self.log(f"Trovati {len(video_files)} video da analizzare...")
