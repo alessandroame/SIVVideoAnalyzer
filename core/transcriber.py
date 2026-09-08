@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass
+from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass
@@ -42,12 +42,16 @@ class SIVTranscriber:
 
     def transcribe(self, audio_path: str, language: str = "it", progress_callback=None) -> List[TranscriptionSegment]:
         model = self.load_model()
+        # Disabilitiamo vad_filter aggressivo che causava l'arresto anticipato in presenza di fruscio del vento
+        # e aumentiamo la tolleranza al rumore di fondo tipico dei voli in parapendio.
         segments, info = model.transcribe(
             audio_path,
             language=language,
             beam_size=5,
-            vad_filter=True, # filtra automaticamente silenzi prolungati
-            vad_parameters=dict(min_silence_duration_ms=500)
+            vad_filter=False,  # Garantisce che l'intero audio venga processato da 00:00 fino all'ultimo secondo
+            condition_on_previous_text=False,  # Evita loop di allucinazioni o blocchi dopo tratti di silenzio
+            no_speech_threshold=0.6,
+            log_prob_threshold=-1.0
         )
         
         result = []
