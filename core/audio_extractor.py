@@ -1,4 +1,4 @@
-﻿import os
+import os
 import subprocess
 from pathlib import Path
 import imageio_ffmpeg
@@ -8,15 +8,25 @@ def get_ffmpeg_binary() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 def extract_audio(video_path: str, output_wav_path: str, sample_rate: int = 16000) -> str:
-    """Estrae l'audio da un video in formato WAV mono 16kHz ottimizzato per Whisper."""
+    """
+    Estrae l'audio da un video in formato WAV mono 16kHz ottimizzato per Whisper.
+    Applica filtri per:
+    1. Tagliare le basse frequenze del vento (< 200 Hz)
+    2. Tagliare i fischi e disturbi ad alta frequenza (> 3500 Hz)
+    3. Normalizzare il volume della radio (loudnorm)
+    """
     ffmpeg_exe = get_ffmpeg_binary()
     os.makedirs(os.path.dirname(output_wav_path), exist_ok=True)
     
+    # Filtro audio passa-banda per voce radio + soppressione vento + normalizzazione volume
+    audio_filter = "highpass=f=200,lowpass=f=3500,loudnorm=I=-16:TP=-1.5:LRA=11"
+
     cmd = [
         ffmpeg_exe,
         "-y",
         "-i", str(video_path),
         "-vn",
+        "-af", audio_filter,
         "-acodec", "pcm_s16le",
         "-ar", str(sample_rate),
         "-ac", "1",

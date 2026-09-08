@@ -37,17 +37,35 @@ class SIVTranscriber:
             elif dev == "cuda" and c_type == "default":
                 c_type = "float16"
 
-            self._model = WhisperModel(self.model_size, device=dev, compute_type=c_type)
+            import os
+            cpu_threads = os.cpu_count() or 4
+            self._model = WhisperModel(
+                self.model_size,
+                device=dev,
+                compute_type=c_type,
+                cpu_threads=cpu_threads,
+                num_workers=2
+            )
         return self._model
 
     def transcribe(self, audio_path: str, language: str = "it", progress_callback=None) -> List[TranscriptionSegment]:
         model = self.load_model()
-        # Disabilitiamo vad_filter aggressivo che causava l'arresto anticipato in presenza di fruscio del vento
-        # e aumentiamo la tolleranza al rumore di fondo tipico dei voli in parapendio.
+
+        # Prompt contestuale SIV per guidare la rete neurale sul vocabolario specifico del parapendio
+        siv_initial_prompt = (
+            "Corso SIV di parapendio. Comunicazioni radio dell'istruttore: "
+            "chiusura asimmetrica 30% 50% 75%, chiudi destra, chiudi sinistra, frontale, "
+            "orecchie, grandi orecchie, speed bar, acceleratore, spirale picchiata, vite, "
+            "uscita progressiva, wingover, inversione di rollio, delfinaggio, beccheggio, "
+            "b-stall, stallo di b, full stall, stallo pieno, backfly, retrocessione, spin, "
+            "negativa, autorotazione, radio check, sei in box, pronto per l'esercizio, vai, via, lascia."
+        )
+
         segments, info = model.transcribe(
             audio_path,
             language=language,
             beam_size=5,
+            initial_prompt=siv_initial_prompt,
             vad_filter=False,  # Garantisce che l'intero audio venga processato da 00:00 fino all'ultimo secondo
             condition_on_previous_text=False,  # Evita loop di allucinazioni o blocchi dopo tratti di silenzio
             no_speech_threshold=0.6,

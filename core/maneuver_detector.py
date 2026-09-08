@@ -1,4 +1,4 @@
-﻿import json
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -41,13 +41,32 @@ class ManeuverDetector:
     def detect_chapters(self, segments: List[TranscriptionSegment], min_score: int = 70, min_gap_seconds: float = 12.0) -> List[SIVChapter]:
         """
         Analizza i segmenti trascritti e individua i comandi delle manovre.
-        min_score: punteggio minimo di fuzzy matching (0-100).
-        min_gap_seconds: intervallo minimo tra due capitoli della stessa manovra per evitare duplicati.
+        Utilizza una Sliding Context Window a due livelli per catturare sia le chiamate dirette
+        che le sequenze tipiche SIV: [Spiegazione manovra] + [Comando esecutivo: 'vai', 'tira', '3 2 1'].
         """
         detected_chapters: List[SIVChapter] = []
+        action_triggers = ["vai", "tira", "chiudi", "adesso", "ora", "3, 2, 1", "3 2 1", "giù", "sfonda"]
 
-        for seg in segments:
+        for i, seg in enumerate(segments):
             text_lower = seg.text.lower()
+            
+            # Contesto allargato: segmento corrente + segmento successivo se entro 7 secondi
+            combined_text = text_lower
+            target_start = seg.start
+            target_end = seg.end
+            
+            if i + 1 < len(segments):
+                next_seg = segments[i + 1]
+                if (next_seg.start - seg.end) <= 7.0:
+                    combined_text = f"{text_lower} {next_seg.text.lower()}"
+                    # Se il segmento successivo contiene il comando esecutivo ("vai", "tira!"),
+                    # il timestamp del capitolo viene posizionato sull'istante esatto dell'azione!
+                    for act in action_triggers:
+                        if act in next_seg.text.lower():
+                            target_start = next_seg.start
+                            target_end = next_seg.end
+                            break
+
             best_match = None
             best_score = 0
 
@@ -58,12 +77,18 @@ class ManeuverDetector:
                 
                 for kw in m["keywords"]:
                     kw_lower = kw.lower()
-                    # Controllo sottostringa esatta (alta priorità)
-                    if kw_lower in text_lower:
+                    # Controllo su testo combinato e su testo singolo
+                    if kw_lower in text_lower or kw_lower in combined_text:
                         score = 95
+                    elif len(kw_lower) >= 6:
+                        score = max(
+                            fuzz.partial_ratio(kw_lower, text_lower),
+                            fuzz.partial_ratio(kw_lower, combined_text)
+                        )
+                        if score < 82:
+                            score = 0
                     else:
-                        # Fuzzy partial ratio
-                        score = fuzz.partial_ratio(kw_lower, text_lower)
+                        score = 0
                     
                     if score > best_score and score >= min_score:
                         best_score = score
@@ -84,8 +109,8 @@ class ManeuverDetector:
 
                 if not is_duplicate:
                     chapter = SIVChapter(
-                        start_time=seg.start,
-                        end_time=seg.end,
+                        start_time=target_start,
+                        end_time=target_end,
                         maneuver_id=m_id,
                         maneuver_name=m_name,
                         category=category,
