@@ -1,4 +1,4 @@
-﻿import os
+import os
 import glob
 import time
 import json
@@ -436,6 +436,23 @@ class MainWindow(QMainWindow):
         self.settings.sync()
 
     def closeEvent(self, event):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            reply = QMessageBox.question(
+                self,
+                "Elaborazione in corso",
+                "Un'elaborazione video/audio è attualmente in corso.\nVuoi interromperla e chiudere l'applicazione?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.worker.request_cancel()
+                self.worker.wait(2000)
+                self.save_settings()
+                event.accept()
+            else:
+                event.ignore()
+                return
+
         self.save_settings()
         super().closeEvent(event)
 
@@ -570,6 +587,16 @@ class MainWindow(QMainWindow):
 
     def cancel_current_task(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
+            reply = QMessageBox.question(
+                self,
+                "Conferma Interruzione",
+                "Sei sicuro di voler interrompere l'elaborazione in corso?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
             self.status_label.setText("Interruzione in corso...")
             self.btn_cancel_task.setEnabled(False)
             self.worker.request_cancel()
