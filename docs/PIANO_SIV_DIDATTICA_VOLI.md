@@ -1,4 +1,4 @@
-﻿# Piano Operativo SIV: Struttura Output Portatile al 100% (Chiavetta USB & Multi-PC)
+# Piano Operativo SIV: Struttura Output Portatile al 100% (Chiavetta USB & Multi-PC)
 
 Questo piano integra i requisiti di **portabilità assoluta**, **organizzazione didattica per volo** e **gestione avanzata dei piloti** (inclusi modello e colori della vela).
 
@@ -118,7 +118,20 @@ Quando l'istruttore o il pilota inserisce la chiavetta su un altro PC:
 
 ---
 
-## 6. Export Finale per Chiavette USB Piloti
+## 6. Rilevamento Intelligente Video Già Analizzati (Step 1)
+
+Quando l'utente seleziona la cartella sorgente nello Step 1, il sistema effettua una pre-scansione comparativa con la cache locale (`temp/*_cache.json`) e con i manifest/cartelle di volo già presenti nella cartella di destinazione:
+- **Tutti i video già analizzati**:
+  - Viene mostrato un banner/avviso informativo nello Step 1 (es. *"Tutti i 12 video risultano già analizzati e trascritti"*).
+  - L'avvio dell'elaborazione propone esplicitamente: *"Tutti i video risultano già elaborati. Vuoi procedere direttamente alla revisione o rieseguire l'analisi da zero?"*.
+- **Parte dei video già analizzati (analisi incrementale)**:
+  - Lo Step 1 segnala chiaramente il dettaglio (es. *"Trovati 15 video: 10 già analizzati, 5 nuovi da elaborare"*).
+  - Viene proposto un pulsante o scelta di default: **"Analizza solo i 5 video mancanti"** (risparmiando tempo prezioso di CPU/GPU sul campo), mantenendo opzionale la ri-analisi completa.
+- **Nessun salto cieco**: L'utente non viene catapultato all'improvviso alla revisione o al debriefing senza capire cosa sia successo, ma riceve una notifica chiara nello Step 1 con pieno controllo della decisione.
+
+---
+
+## 7. Export Finale per Chiavette USB Piloti
 
 A fine giornata / corso, l'istruttore usa la funzione di esportazione per produrre i file finali:
 - **Opzione 1 (Per Volo)**: genera un video unificato per ciascun volo del pilota (`Alessandro_Volo_1.mp4`, `Alessandro_Volo_2.mp4`) con capitoli YouTube inclusi.
@@ -129,7 +142,7 @@ A fine giornata / corso, l'istruttore usa la funzione di esportazione per produr
 
 ---
 
-## 7. Tabella di Marcia dello Sviluppo
+## 8. Tabella di Marcia dello Sviluppo
 
 - [ ] **Step A**: Creazione modulo `core/manifest_manager.py` per salvare e caricare `corso_siv_manifest.json` e `pilota_info.json`.
 - [ ] **Step B**: UI Step 1 con gestione piloti arricchita (Nome, Vela, Colori) e salvataggio automatico nel manifest.
@@ -137,4 +150,5 @@ A fine giornata / corso, l'istruttore usa la funzione di esportazione per produr
 - [ ] **Step D**: Salvataggio di `trascrizione.json` e `capitoli.json` all'interno di ogni cartella di volo per totale portabilità.
 - [ ] **Step E**: Player Step 3 con navigazione a due livelli `Pilota ➔ Volo ➔ Manovra` senza rendering preventivo.
 - [ ] **Step F**: Pulsante e logica "Apri Sessione Esistente (Plug & Play)" per chiavette USB e dischi esterni.
-- [ ] **Step G**: Modulo di esportazione finale (montato per volo / montato completo con sovrimpressioni e sottotitoli).
+- [ ] **Step G**: Rilevamento Intelligente Video Già Analizzati nello Step 1 (Controllo cache/output con opzione di analizzare solo i mancanti anziché forzare o saltare alla cieca).
+- [ ] **Step H**: Modulo di esportazione finale (montato per volo / montato completo con sovrimpressioni e sottotitoli).

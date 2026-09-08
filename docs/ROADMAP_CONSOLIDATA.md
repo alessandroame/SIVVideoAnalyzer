@@ -1,4 +1,4 @@
-﻿# SIV Video Analyzer - Roadmap Consolidata e Piani di Sviluppo
+# SIV Video Analyzer - Roadmap Consolidata e Piani di Sviluppo
 
 Questo documento unifica, consolida e riorganizza tutti i piani di sviluppo del progetto **SIV Video Analyzer**, allineandoli alle reali esigenze didattiche dell'istruttore sul campo e alla portabilità su chiavetta USB / multi-computer.
 
@@ -59,6 +59,10 @@ flowchart TD
   - Aggiunta della colonna *Numero di Volo* (`Volo 1`, `Volo 2`, ...) nella tabella a schermo intero.
   - Possibilità per l'istruttore di associare più clip allo stesso volo o separarle con 1 click.
   - **Sostituzione del tasto finale**: *"Conferma ed Entra nel Debriefing ➡"* (salto istantaneo a Step 3 senza attendere rendering).
+- [ ] **2.4 Rilevamento Intelligente Video Già Analizzati nello Step 1**:
+  - Scansione preventiva della cache locale (`temp/`) e dell'output (`manifest`/cartelle volo).
+  - Notifica esplicita all'utente nello Step 1 sullo stato dei video (tutti analizzati vs parzialmente analizzati).
+  - Proposta dell'azione corretta: *"Analizza solo i video mancanti"* (invece di forzare la ri-analisi di tutto) oppure richiesta esplicita se passare alla revisione qualora siano tutti pronti, senza salti ciechi o inattesi.
 
 ---
 

@@ -1,4 +1,4 @@
-﻿# VideoAnalyzer - TODO & Roadmap
+# VideoAnalyzer - TODO & Roadmap
 
 ## Feature & Miglioramenti in Corso / Pianificati
 
@@ -8,7 +8,11 @@
   - [ ] Sistema di "Auto-learning" firme cromatiche: associa il colore della vela ai piloti confermati via radio.
   - [ ] Integrazione in `core/pilot_detector.py` come booster/fallback per i video "Da Assegnare" o a bassa confidenza.
   - [ ] Mostrare i colori dominanti della vela come badge/pallino visivo nella tabella di revisione Step 2 (`ui/step2_review_view.py`).
-  - [ ] Test unitari dedicati in `tests/test_wing_color_detector.py`.
+- [ ] **Rilevamento Intelligente Video Già Analizzati (Step 1)**
+  - [ ] Scansione preventiva rapida (cache locale `temp/` e manifest/output `output_siv/`).
+  - [ ] Avviso chiaro nello Step 1 con stato dei video rilevati (già analizzati vs mancanti).
+  - [ ] Se tutti i video sono già stati analizzati: avvisa l'utente e chiedi conferma (es. procedere alla revisione o rieseguire da zero), evitando salti improvvisi non richiesti.
+  - [ ] Se solo alcuni video sono già analizzati: proponi esplicitamente *"Analizza solo i video mancanti"* (risparmiando tempo di trascrizione Whisper).
 
 ---
 
