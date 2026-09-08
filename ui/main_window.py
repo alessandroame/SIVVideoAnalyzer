@@ -151,8 +151,9 @@ class MainWindow(QMainWindow):
 
         # Barra di avanzamento e stato globale con pulsante di interruzione (in basso)
         self.status_box = QHBoxLayout()
+        self.status_box.setContentsMargins(4, 4, 4, 4)
         self.status_label = QLabel("Pronto.")
-        self.status_label.setStyleSheet("font-weight: 500;")
+        self.status_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #e2e8f0;")
         self.status_box.addWidget(self.status_label, stretch=1)
 
         self.progress_bar = QProgressBar()
@@ -160,13 +161,18 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(False)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #bbb;
-                border-radius: 4px;
+                border: 1px solid #475569;
+                border-radius: 5px;
                 text-align: center;
-                height: 18px;
+                height: 24px;
+                font-size: 13px;
+                font-weight: bold;
+                color: #ffffff;
+                background-color: #0f172a;
             }
             QProgressBar::chunk {
-                background-color: #0288d1;
+                background-color: #0284c7;
+                border-radius: 4px;
             }
         """)
         self.status_box.addWidget(self.progress_bar, stretch=2)
@@ -178,8 +184,9 @@ class MainWindow(QMainWindow):
                 background-color: #dc2626; 
                 color: white; 
                 font-weight: bold; 
-                padding: 4px 12px;
-                border-radius: 4px;
+                font-size: 13px;
+                padding: 6px 16px;
+                border-radius: 5px;
             }
             QPushButton:hover {
                 background-color: #b91c1c;
@@ -206,37 +213,45 @@ class MainWindow(QMainWindow):
 
     def init_step1_widget(self):
         layout = QVBoxLayout(self.step1_widget)
-        layout.setSpacing(10)
+        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         # Selezione Cartella Sorgente Video
-        box_input = QGroupBox("Cartella Video Sorgente (supporta schede SD Sony .MTS/.MXF/MP4)")
+        box_input = QGroupBox("1. Dove si trovano i video del SIV? (Scheda SD o Cartella)")
+        box_input.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; }")
         l_in = QHBoxLayout(box_input)
         self.txt_source_dir = QLineEdit()
-        self.txt_source_dir.setPlaceholderText("Seleziona la cartella contenente i video del corso SIV...")
+        self.txt_source_dir.setPlaceholderText("Es. E:\\ o D:\\Video SIV...")
+        self.txt_source_dir.setStyleSheet("padding: 6px; font-size: 13px;")
         l_in.addWidget(self.txt_source_dir)
-        btn_browse_src = QPushButton("Sfoglia...")
+        btn_browse_src = QPushButton("Sfoglia Cartella...")
+        btn_browse_src.setStyleSheet("padding: 6px 14px; font-size: 13px;")
         btn_browse_src.clicked.connect(self.browse_source_dir)
         l_in.addWidget(btn_browse_src)
         layout.addWidget(box_input)
 
         # Gestione Piloti del Corso con Modello Vela e Colori
-        box_pilots = QGroupBox("Anagrafica Piloti del Corso (Vela e Colori per identificazione e memoria chiavetta)")
+        box_pilots = QGroupBox("2. Piloti del Corso (Nome e Colore della Vela per facilitare il debriefing)")
+        box_pilots.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; }")
         l_pilots = QVBoxLayout(box_pilots)
 
         self.table_pilots = QTableWidget(0, 3)
-        self.table_pilots.setHorizontalHeaderLabels(["Nome e Cognome Pilota", "Modello Vela (es. Rush 6)", "Colori Vela (es. Rosso/Nero)"])
+        self.table_pilots.setHorizontalHeaderLabels(["Nome Pilota", "Vela (es. Rush 6, Mentor)", "Colori Vela (es. Rosso/Nero)"])
         self.table_pilots.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table_pilots.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table_pilots.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.table_pilots.setMaximumHeight(130)
+        self.table_pilots.setMaximumHeight(140)
+        self.table_pilots.setStyleSheet("font-size: 13px;")
         l_pilots.addWidget(self.table_pilots)
 
         pilot_btn_layout = QHBoxLayout()
-        btn_add_p = QPushButton("+ Aggiungi Pilota")
+        btn_add_p = QPushButton("➕ Aggiungi Pilota")
+        btn_add_p.setStyleSheet("padding: 5px 12px; font-size: 13px;")
         btn_add_p.clicked.connect(self.add_pilot_row)
         pilot_btn_layout.addWidget(btn_add_p)
 
-        btn_del_p = QPushButton("- Rimuovi Selezionato")
+        btn_del_p = QPushButton("➖ Rimuovi Selezionato")
+        btn_del_p.setStyleSheet("padding: 5px 12px; font-size: 13px;")
         btn_del_p.clicked.connect(self.remove_pilot_row)
         pilot_btn_layout.addWidget(btn_del_p)
         pilot_btn_layout.addStretch()
@@ -244,48 +259,63 @@ class MainWindow(QMainWindow):
         l_pilots.addLayout(pilot_btn_layout)
         layout.addWidget(box_pilots)
 
-        # Cartella di Output e Modalità Modello Whisper
+        # Cartella di Output e Modalità Modello Whisper (Compatti e Chiari)
         row_config = QHBoxLayout()
 
-        box_output = QGroupBox("Cartella di Destinazione (Output Portatile / Chiavetta USB)")
+        box_output = QGroupBox("3. Dove salvare la sessione per i debriefing?")
+        box_output.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; }")
         l_out = QHBoxLayout(box_output)
         self.txt_output_dir = QLineEdit()
         self.txt_output_dir.setText(os.path.abspath("output_siv"))
+        self.txt_output_dir.setStyleSheet("padding: 6px; font-size: 13px;")
         l_out.addWidget(self.txt_output_dir)
         btn_browse_out = QPushButton("Sfoglia...")
+        btn_browse_out.setStyleSheet("padding: 6px 14px; font-size: 13px;")
         btn_browse_out.clicked.connect(self.browse_output_dir)
         l_out.addWidget(btn_browse_out)
         row_config.addWidget(box_output, stretch=3)
 
-        box_model = QGroupBox("Modello Whisper (Velocità / Precisione)")
+        box_model = QGroupBox("Modalità Trascrizione")
+        box_model.setStyleSheet("QGroupBox { font-size: 14px; font-weight: bold; }")
         l_model = QHBoxLayout(box_model)
         self.combo_model = QComboBox()
-        self.combo_model.addItem("Ultra Veloce (Base - Consigliato)", "base")
-        self.combo_model.addItem("Alta Precisione (Small)", "small")
+        self.combo_model.addItem("⚡ Ultra Rapida (Consigliata tra i voli)", "base")
+        self.combo_model.addItem("🎯 Approfondita (Per fine giornata)", "small")
+        self.combo_model.setStyleSheet("padding: 6px; font-size: 13px;")
         l_model.addWidget(self.combo_model)
         row_config.addWidget(box_model, stretch=2)
 
         layout.addLayout(row_config)
 
-        # Log eventi
-        layout.addWidget(QLabel("<b>Log Operazioni:</b>"))
+        # Log eventi pulito e compatto
+        layout.addWidget(QLabel("<b>Avanzamento Operazioni:</b>"))
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(100)
+        self.log_text.setMaximumHeight(110)
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #0f172a;
+                color: #38bdf8;
+                font-family: Consolas, monospace;
+                font-size: 12px;
+                border-radius: 4px;
+                padding: 6px;
+            }
+        """)
         layout.addWidget(self.log_text)
 
         # Pulsante di Azione Primario e Gestione Cache
         btn_action_layout = QHBoxLayout()
 
-        self.btn_clear_cache = QPushButton("🗑 Svuota Cache Audio")
-        self.btn_clear_cache.setToolTip("Elimina le trascrizioni memorizzate per rieseguire l'analisi audio da zero con Whisper")
+        self.btn_clear_cache = QPushButton("🗑 Svuota Cache")
+        self.btn_clear_cache.setToolTip("Elimina le trascrizioni memorizzate per rieseguire l'analisi da zero")
         self.btn_clear_cache.setStyleSheet("""
             QPushButton {
                 background-color: #475569; 
                 color: #f1f5f9; 
                 font-size: 13px; 
-                padding: 12px 16px;
-                border-radius: 5px;
+                padding: 12px 18px;
+                border-radius: 6px;
             }
             QPushButton:hover {
                 background-color: #64748b;
@@ -294,18 +324,18 @@ class MainWindow(QMainWindow):
         self.btn_clear_cache.clicked.connect(self.clear_cache)
         btn_action_layout.addWidget(self.btn_clear_cache)
 
-        self.btn_detect_pilots = QPushButton("Avvia Analisi Audio & Riconoscimento Piloti ➡")
+        self.btn_detect_pilots = QPushButton("🚀 AVVIA ANALISI VIDEO E RICONOSCIMENTO PILOTI ➡")
         self.btn_detect_pilots.setStyleSheet("""
             QPushButton {
-                background-color: #0288d1; 
+                background-color: #0284c7; 
                 color: white; 
                 font-weight: bold; 
-                font-size: 14px; 
-                padding: 12px;
-                border-radius: 5px;
+                font-size: 15px; 
+                padding: 14px;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #0277bd;
+                background-color: #0369a1;
             }
         """)
         self.btn_detect_pilots.clicked.connect(self.start_pilot_detection)
@@ -497,18 +527,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nessun video", "Nessun file video trovato nella cartella specificata (inclusi formati Sony .MTS/.MXF/MP4).")
             return
 
-        self.log(f"Trovati {len(video_files)} video da analizzare...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.btn_cancel_task.setVisible(True)
-        self.btn_detect_pilots.setEnabled(False)
+        # Mostra nel log la configurazione essenziale con cui è stata lanciata
+        mode_name = self.combo_model.currentText()
+        self.log(f"<b>▶ Avvio Analisi:</b> {len(video_files)} clip trovate | Modalità: <i>{mode_name}</i>")
+        self.log(f"<b>Piloti monitorati:</b> {', '.join(pilot_names) if pilot_names else 'Tutti (Rilevamento automatico)'}")
 
         def task(progress_sig, is_cancelled):
             detector = PilotDetector(pilots_list=pilot_names, transcriber=self.transcriber)
             matches = []
             total = len(video_files)
             start_wall_time = time.time()
-            last_eta_str = "Stima in corso..."
+            last_eta_str = ""
 
             for i, vf in enumerate(video_files):
                 if is_cancelled():
@@ -519,8 +548,9 @@ class MainWindow(QMainWindow):
                 base_percent = (i / total) * 100.0
                 file_slice = 100.0 / total
 
+                eta_display = f" | {last_eta_str}" if last_eta_str else ""
                 progress_sig.emit(
-                    f"Video {i+1}/{total} ({fname}): estrazione e trascrizione audio... | {last_eta_str}",
+                    f"Ascolto comunicazioni radio... Clip {i+1} di {total} ({fname}){eta_display}",
                     int(base_percent)
                 )
 
@@ -539,15 +569,11 @@ class MainWindow(QMainWindow):
                         remaining = max(0.0, est_total - elapsed)
                         m_rem = int(remaining // 60)
                         s_rem = int(remaining % 60)
-                        last_eta_str = f"Tempo residuo totale stimato: {m_rem:02d}m {s_rem:02d}s" if remaining > 2 else "Completamento in corso..."
+                        last_eta_str = f"⏱ Circa {m_rem:02d}m {s_rem:02d}s rimanenti" if remaining > 2 else "⏱ Quasi completato..."
 
-                    m_curr = int(curr_sec // 60)
-                    s_curr = int(curr_sec % 60)
-                    m_tot = int(dur_sec // 60)
-                    s_tot = int(dur_sec % 60)
-
+                    eta_display = f" | {last_eta_str}" if last_eta_str else ""
                     progress_sig.emit(
-                        f"Video {i+1}/{total} ({fname}) | Audio: {m_curr:02d}:{s_curr:02d}/{m_tot:02d}:{s_tot:02d} | {last_eta_str}",
+                        f"Ascolto comunicazioni radio... Clip {i+1} di {total} ({fname}){eta_display}",
                         int(overall_pct)
                     )
 
@@ -559,6 +585,12 @@ class MainWindow(QMainWindow):
                 if is_cancelled():
                     return matches
                 matches.append(m)
+
+                # Notifica nel log l'avvenuto riconoscimento del pilota
+                detected_str = f"→ {fname}: Riconosciuto <b>{m.detected_pilot}</b>"
+                if m.matched_phrases:
+                    detected_str += f" (radio: <i>'{m.matched_phrases[0]}'</i>)"
+                progress_sig.emit(detected_str, int((i + 1) / total * 100.0))
 
             # Raggruppa provvisoriamente per numero di volo per ciascun pilota
             pilot_map = {}
@@ -610,7 +642,12 @@ class MainWindow(QMainWindow):
         self.log("<b>Elaborazione interrotta dall'utente.</b>")
 
     def on_progress(self, msg, val):
-        self.status_label.setText(msg)
+        if msg.startswith("→"):
+            # È un evento chiave (pilota riconosciuto): lo stampiamo nel log
+            self.log(msg)
+        else:
+            # È lo stato del progresso: lo mostriamo nella status label
+            self.status_label.setText(msg)
         self.progress_bar.setValue(val)
 
     def on_pilots_detected(self, matches):

@@ -1,4 +1,4 @@
-﻿import os
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QComboBox, QFrame, QSpinBox
@@ -20,13 +20,13 @@ class Step2ReviewView(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        # Header informativo
+        # Header informativo minimale
         info_box = QFrame()
         info_box.setStyleSheet("""
             QFrame {
                 background-color: #1e293b; 
-                border-radius: 6px; 
-                padding: 10px;
+                border-radius: 8px; 
+                padding: 12px 16px;
                 border: 1px solid #334155;
             }
             QLabel {
@@ -34,47 +34,62 @@ class Step2ReviewView(QWidget):
             }
         """)
         l_info = QVBoxLayout(info_box)
-        lbl_title = QLabel("<h2>Revisione Video & Assegnazione per Volo</h2>")
-        lbl_title.setStyleSheet("color: #38bdf8; font-weight: bold; margin-bottom: 2px;")
-        lbl_desc = QLabel(
-            "Verifica l'associazione del pilota e il <b>Numero di Volo</b> assegnato alle clip.<br>"
-            "Lo stesso volo può raggruppare più video consecutivi. Correggi pilota o numero di volo prima di entrare nel debriefing."
-        )
-        lbl_desc.setStyleSheet("color: #cbd5e1; font-size: 13px;")
+        lbl_title = QLabel("<h2 style='margin:0; color:#38bdf8;'>Revisione Voli (Tra i Voli)</h2>")
+        lbl_desc = QLabel("Verifica l'associazione Pilota e Volo per ogni clip. Correggi solo se necessario, poi clicca sul pulsante verde.")
+        lbl_desc.setStyleSheet("color: #cbd5e1; font-size: 14px; margin-top: 4px;")
         l_info.addWidget(lbl_title)
         l_info.addWidget(lbl_desc)
         layout.addWidget(info_box)
 
-        # Tabella Video Assegnati con colonna VOLO
-        self.table = QTableWidget(0, 5)
+        # Tabella Video Assegnati essenziale (meno colonne dispersive)
+        self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels([
-            "File Video Sorgente", 
-            "Pilota Assegnato", 
+            "File Video", 
+            "Pilota", 
             "Volo N°",
-            "Confidenza Radio", 
-            "Frasi Radio Chiave Riconosciute"
+            "Chiamata Radio Riconosciuta"
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.setStyleSheet("""
+            QTableWidget {
+                font-size: 14px;
+                selection-background-color: #0284c7;
+            }
+            QHeaderView::section {
+                font-size: 13px;
+                font-weight: bold;
+                padding: 6px;
+            }
+        """)
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
 
         # Barra Pulsanti Navigazione
         btn_layout = QHBoxLayout()
-        self.btn_back = QPushButton("⬅ Torna a Configurazione")
-        self.btn_back.setStyleSheet("padding: 8px 16px; font-size: 13px;")
+        self.btn_back = QPushButton("⬅ Indietro")
+        self.btn_back.setStyleSheet("padding: 10px 18px; font-size: 14px; font-weight: 500;")
         self.btn_back.clicked.connect(self.back_signal.emit)
         btn_layout.addWidget(self.btn_back)
 
         btn_layout.addStretch()
 
-        self.btn_confirm = QPushButton("Conferma ed Entra nel Debriefing / Replay ➡")
-        self.btn_confirm.setStyleSheet(
-            "background-color: #2e7d32; color: white; font-weight: bold; font-size: 13px; padding: 10px 22px; border-radius: 4px;"
-        )
+        self.btn_confirm = QPushButton("➡ ENTRA NEL DEBRIEFING (Zero Attese)")
+        self.btn_confirm.setStyleSheet("""
+            QPushButton {
+                background-color: #16a34a; 
+                color: white; 
+                font-weight: bold; 
+                font-size: 15px; 
+                padding: 12px 28px; 
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #15803d;
+            }
+        """)
         self.btn_confirm.clicked.connect(self.on_confirm)
         btn_layout.addWidget(self.btn_confirm)
 
@@ -93,8 +108,9 @@ class Step2ReviewView(QWidget):
             file_item.setFlags(file_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 0, file_item)
 
-            # Colonna 1: ComboBox Pilota
+            # Colonna 1: ComboBox Pilota (più comodo da selezionare)
             combo = QComboBox()
+            combo.setStyleSheet("font-size: 14px; padding: 4px;")
             all_pilots = list(dict.fromkeys(self.pilots_list + [match.detected_pilot]))
             combo.addItems(all_pilots)
             idx = combo.findText(match.detected_pilot)
@@ -108,21 +124,14 @@ class Step2ReviewView(QWidget):
             spin_volo.setRange(1, 99)
             flight_num = getattr(match, 'flight_number', 1) or 1
             spin_volo.setValue(flight_num)
-            spin_volo.setStyleSheet("padding: 3px; font-weight: bold;")
+            spin_volo.setStyleSheet("padding: 4px; font-size: 14px; font-weight: bold;")
             self.table.setCellWidget(row, 2, spin_volo)
 
-            # Colonna 3: Confidenza
-            conf_percent = f"{int(match.confidence * 100)}%"
-            conf_item = QTableWidgetItem(conf_percent)
-            conf_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            conf_item.setFlags(conf_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 3, conf_item)
-
-            # Colonna 4: Frasi Rilevate
-            phrases_text = " | ".join(match.matched_phrases) if match.matched_phrases else "Nessuna chiamata radio esplicita"
+            # Colonna 3: Frasi Rilevate (chiamata radio)
+            phrases_text = " | ".join(match.matched_phrases) if match.matched_phrases else "—"
             phrases_item = QTableWidgetItem(phrases_text)
             phrases_item.setFlags(phrases_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 4, phrases_item)
+            self.table.setItem(row, 3, phrases_item)
 
     def on_confirm(self):
         for row, match in enumerate(self.matches):

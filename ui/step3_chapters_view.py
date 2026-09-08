@@ -1,4 +1,4 @@
-﻿import os
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QSlider,
@@ -76,17 +76,19 @@ class ChaptersView(QWidget):
 
         main_layout.addWidget(top_bar)
 
-        # Splitter principale: Sinistra Player, Destra Capitoli
+        # Splitter principale: Sinistra Player (75%), Destra Capitoli (25%)
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Sinistra: Player Video
         player_container = QWidget()
         player_layout = QVBoxLayout(player_container)
         player_layout.setContentsMargins(0, 0, 0, 0)
+        player_layout.setSpacing(6)
 
         self.video_widget = QVideoWidget()
-        self.video_widget.setMinimumSize(480, 270)
-        player_layout.addWidget(self.video_widget)
+        self.video_widget.setMinimumSize(640, 360)
+        self.video_widget.setStyleSheet("background-color: black; border-radius: 6px;")
+        player_layout.addWidget(self.video_widget, stretch=1)
 
         # Media Player
         self.media_player = QMediaPlayer()
@@ -94,14 +96,29 @@ class ChaptersView(QWidget):
         self.media_player.setAudioOutput(self.audio_output)
         self.media_player.setVideoOutput(self.video_widget)
 
-        # Controlli player
+        # Controlli player grandi per uso rapido
         ctrl_layout = QHBoxLayout()
-        self.btn_play_pause = QPushButton("Play")
-        self.btn_play_pause.setStyleSheet("font-weight: bold; min-width: 60px;")
+        ctrl_layout.setSpacing(8)
+
+        self.btn_play_pause = QPushButton("▶ Play")
+        self.btn_play_pause.setStyleSheet("""
+            QPushButton {
+                font-size: 15px; 
+                font-weight: bold; 
+                padding: 8px 18px; 
+                background-color: #0284c7; 
+                color: white; 
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+            }
+        """)
         self.btn_play_pause.clicked.connect(self.toggle_play)
         ctrl_layout.addWidget(self.btn_play_pause)
 
         self.time_label = QLabel("00:00 / 00:00")
+        self.time_label.setStyleSheet("font-size: 14px; font-weight: bold; min-width: 110px;")
         ctrl_layout.addWidget(self.time_label)
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
@@ -115,48 +132,47 @@ class ChaptersView(QWidget):
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
 
-        right_layout.addWidget(QLabel("<b>Manovre del Volo (Doppio click per saltare nel video):</b>"))
+        lbl_caps = QLabel("<b>Manovre del Volo (clicca due volte per vedere):</b>")
+        lbl_caps.setStyleSheet("font-size: 13px; color: #f8fafc;")
+        right_layout.addWidget(lbl_caps)
 
-        self.table_chapters = QTableWidget(0, 4)
-        self.table_chapters.setHorizontalHeaderLabels(["Inizio", "Fine", "Manovra Riconosciuta", "Trascrizione Radio"])
+        self.table_chapters = QTableWidget(0, 3)
+        self.table_chapters.setHorizontalHeaderLabels(["Minutaggio", "Manovra", "Comando Radio"])
         self.table_chapters.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table_chapters.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_chapters.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_chapters.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table_chapters.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table_chapters.setStyleSheet("""
+            QTableWidget {
+                font-size: 13px;
+                selection-background-color: #0284c7;
+            }
+        """)
         self.table_chapters.cellDoubleClicked.connect(self.on_chapter_double_clicked)
         self.table_chapters.setAlternatingRowColors(True)
         right_layout.addWidget(self.table_chapters)
 
-        # Pulsanti gestione ed export
+        # Pulsanti gestione
         action_layout = QHBoxLayout()
-        self.btn_add_chapter = QPushButton("+ Aggiungi Nota")
-        self.btn_add_chapter.clicked.connect(self.add_manual_chapter)
-        action_layout.addWidget(self.btn_add_chapter)
-
-        self.btn_remove_chapter = QPushButton("- Rimuovi")
-        self.btn_remove_chapter.clicked.connect(self.remove_selected_chapter)
-        action_layout.addWidget(self.btn_remove_chapter)
-
         self.btn_save_changes = QPushButton("💾 Salva Modifiche")
-        self.btn_save_changes.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold;")
+        self.btn_save_changes.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold; padding: 6px 14px; font-size: 13px;")
         self.btn_save_changes.clicked.connect(self.save_changes_signal.emit)
         action_layout.addWidget(self.btn_save_changes)
 
         action_layout.addStretch()
 
-        self.btn_export_yt = QPushButton("Esporta YouTube / TXT")
-        self.btn_export_yt.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; padding: 6px 14px;")
+        self.btn_export_yt = QPushButton("Esporta YouTube")
+        self.btn_export_yt.setStyleSheet("padding: 6px 12px; font-size: 13px;")
         self.btn_export_yt.clicked.connect(self.export_youtube)
         action_layout.addWidget(self.btn_export_yt)
 
         right_layout.addLayout(action_layout)
-
         splitter.addWidget(right_container)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 5)
 
-        main_layout.addWidget(splitter)
+        # Proporzione 70% video, 30% lista capitoli
+        splitter.setSizes([750, 320])
+        main_layout.addWidget(splitter, stretch=1)
 
         # Segnali player
         self.media_player.positionChanged.connect(self.position_changed)
@@ -221,15 +237,15 @@ class ChaptersView(QWidget):
         self.chapters = chapters
         self.table_chapters.setRowCount(len(chapters))
         for row, ch in enumerate(chapters):
-            item_start = QTableWidgetItem(ch.formatted_start)
-            item_end = QTableWidgetItem(f"{int(ch.end_time // 60):02d}:{int(ch.end_time % 60):02d}")
+            time_str = f"{ch.formatted_start} - {int(ch.end_time // 60):02d}:{int(ch.end_time % 60):02d}"
+            item_time = QTableWidgetItem(time_str)
+            item_time.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             item_name = QTableWidgetItem(ch.maneuver_name)
             item_text = QTableWidgetItem(ch.transcription_text)
 
-            self.table_chapters.setItem(row, 0, item_start)
-            self.table_chapters.setItem(row, 1, item_end)
-            self.table_chapters.setItem(row, 2, item_name)
-            self.table_chapters.setItem(row, 3, item_text)
+            self.table_chapters.setItem(row, 0, item_time)
+            self.table_chapters.setItem(row, 1, item_name)
+            self.table_chapters.setItem(row, 2, item_text)
 
     def on_chapter_double_clicked(self, row, col):
         if row < len(self.chapters) and self.current_flight:
