@@ -32,7 +32,7 @@ class PilotDetector:
     def set_pilots_list(self, pilots: List[str]):
         self.pilots_list = [p.strip() for p in pilots if p.strip()]
 
-    def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp") -> VideoPilotMatch:
+    def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp", progress_callback=None) -> VideoPilotMatch:
         """
         Estrae l'audio, calcola la durata, trascrive una sola volta (salvando in cache) e identifica il pilota.
         """
@@ -46,11 +46,18 @@ class PilotDetector:
         if cached:
             duration = cached.duration
             segments = cached.segments
+            if progress_callback:
+                progress_callback(duration, duration)
         else:
+            duration = get_video_duration(video_path)
             wav_path = os.path.join(temp_dir, f"{base_name}_audio.wav")
             extract_audio(video_path, wav_path)
-            duration = get_video_duration(video_path)
-            segments = self.transcriber.transcribe(wav_path, language="it")
+            
+            def on_segment(seg):
+                if progress_callback and duration > 0:
+                    progress_callback(seg.end, duration)
+
+            segments = self.transcriber.transcribe(wav_path, language="it", progress_callback=on_segment)
             
             # Salva in cache
             new_cache = VideoTranscriptionCache(

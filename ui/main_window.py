@@ -215,8 +215,25 @@ class MainWindow(QMainWindow):
             matches = []
             total = len(video_files)
             for i, vf in enumerate(video_files):
-                progress_sig.emit(f"Analisi audio per pilota: {os.path.basename(vf)}...", int((i / total) * 100))
-                m = detector.identify_pilot_from_audio(vf)
+                fname = os.path.basename(vf)
+                base_percent = (i / total) * 100
+                file_slice = 100.0 / total
+                progress_sig.emit(f"Video {i+1}/{total} ({fname}): estrazione e trascrizione audio...", int(base_percent))
+
+                def on_file_progress(curr_sec, dur_sec):
+                    if dur_sec > 0:
+                        curr_file_pct = min(1.0, curr_sec / dur_sec)
+                        overall_pct = base_percent + (curr_file_pct * file_slice)
+                        m_curr = int(curr_sec // 60)
+                        s_curr = int(curr_sec % 60)
+                        m_tot = int(dur_sec // 60)
+                        s_tot = int(dur_sec % 60)
+                        progress_sig.emit(
+                            f"Video {i+1}/{total} ({fname}) - Trascrizione: {m_curr:02d}:{s_curr:02d} / {m_tot:02d}:{s_tot:02d}",
+                            int(overall_pct)
+                        )
+
+                m = detector.identify_pilot_from_audio(vf, progress_callback=on_file_progress)
                 matches.append(m)
             progress_sig.emit("Riconoscimento piloti completato!", 100)
             return matches
@@ -230,7 +247,6 @@ class MainWindow(QMainWindow):
     def on_progress(self, msg, val):
         self.status_label.setText(msg)
         self.progress_bar.setValue(val)
-        self.log(msg)
 
     def on_pilots_detected(self, matches):
         self.progress_bar.setVisible(False)
