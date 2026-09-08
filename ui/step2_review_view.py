@@ -10,20 +10,21 @@ class Step2ReviewView(QWidget):
     open_flight_signal = pyqtSignal(str, int) # (pilot_name, flight_number)
     back_signal = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, hide_header=False):
         super().__init__(parent)
         self.matches = []
         self.pilots_list = []
+        self.hide_header = hide_header
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
         # Header informativo minimale
-        info_box = QFrame()
-        info_box.setStyleSheet("""
+        self.info_box = QFrame()
+        self.info_box.setStyleSheet("""
             QFrame {
                 background-color: #1e293b; 
                 border-radius: 8px; 
@@ -34,13 +35,15 @@ class Step2ReviewView(QWidget):
                 color: #f1f5f9;
             }
         """)
-        l_info = QVBoxLayout(info_box)
+        l_info = QVBoxLayout(self.info_box)
         lbl_title = QLabel("<h2 style='margin:0; color:#38bdf8;'>Revisione Voli (Tra i Voli)</h2>")
         lbl_desc = QLabel("Verifica l'associazione Pilota e Volo per ogni clip. Correggi solo se necessario, poi clicca sul pulsante verde.")
         lbl_desc.setStyleSheet("color: #cbd5e1; font-size: 14px; margin-top: 4px;")
         l_info.addWidget(lbl_title)
         l_info.addWidget(lbl_desc)
-        layout.addWidget(info_box)
+        layout.addWidget(self.info_box)
+        if self.hide_header:
+            self.info_box.setVisible(False)
 
         # Tabella Video Assegnati essenziale con Azione Rapida
         self.table = QTableWidget(0, 5)

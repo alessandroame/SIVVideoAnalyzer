@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFileDialog, QMessageBox, QProgressBar,
     QStackedWidget, QTextEdit, QGroupBox, QFrame, QComboBox, QTableWidget,
-    QTableWidgetItem, QHeaderView
+    QTableWidgetItem, QHeaderView, QSplitter
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 
@@ -167,19 +167,12 @@ class MainWindow(QMainWindow):
         self.init_step1_widget()
         self.stacked_widget.addWidget(self.step1_widget)
 
-        # Step 2: Analisi Video (Schermata di dettaglio analisi)
+        # Step 2: Analisi Video e Registro Voli Unificati
         self.step2_analysis_widget = QWidget()
         self.init_step2_analysis_widget()
         self.stacked_widget.addWidget(self.step2_analysis_widget)
 
-        # Step 3: Tabella Revisione / Registro Voli Completo
-        self.step3_widget = Step2ReviewView()
-        self.step3_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
-        self.step3_widget.open_flight_signal.connect(self.open_specific_flight_debriefing)
-        self.step3_widget.back_signal.connect(self.on_review_back_clicked)
-        self.stacked_widget.addWidget(self.step3_widget)
-
-        # Step 4: Hub Debriefing & Player Voli
+        # Step 3: Hub Debriefing & Player Voli
         self.step4_widget = ChaptersView()
         self.step4_widget.pilot_selected_signal.connect(self.on_hub_pilot_selected)
         self.step4_widget.flight_selected_signal.connect(self.on_hub_flight_selected)
@@ -198,15 +191,13 @@ class MainWindow(QMainWindow):
         self.go_to_step(0)
 
     def switch_to_registry_mode(self):
-        """Passa alla visualizzazione del Registro Voli (o Parametri se non sono ancora stati caricati video)."""
+        """Passa alla visualizzazione del Registro Voli / Analisi (o Parametri se non sono ancora stati caricati video)."""
         self.btn_tab_registry.setChecked(True)
         self.btn_tab_debriefing.setChecked(False)
         self.btn_tab_registry.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
         self.btn_tab_debriefing.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
 
-        if self.step3_widget.table.rowCount() > 0:
-            self.stacked_widget.setCurrentIndex(2)
-        elif hasattr(self, 'worker') and self.worker.isRunning():
+        if self.step3_widget.table.rowCount() > 0 or (hasattr(self, 'worker') and self.worker.isRunning()):
             self.stacked_widget.setCurrentIndex(1)
         else:
             self.stacked_widget.setCurrentIndex(0)
@@ -237,12 +228,12 @@ class MainWindow(QMainWindow):
 
     def go_to_step(self, step_idx: int):
         self.stacked_widget.setCurrentIndex(step_idx)
-        if step_idx in [0, 1, 2]:
+        if step_idx in [0, 1]:
             self.btn_tab_registry.setChecked(True)
             self.btn_tab_debriefing.setChecked(False)
             self.btn_tab_registry.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
             self.btn_tab_debriefing.setStyleSheet("background-color: #334155; color: #cbd5e1; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
-        elif step_idx == 3:
+        elif step_idx == 2:
             self.btn_tab_registry.setChecked(False)
             self.btn_tab_debriefing.setChecked(True)
             self.btn_tab_debriefing.setStyleSheet("background-color: #16a34a; color: white; font-weight: bold; font-size: 14px; padding: 8px 18px; border-radius: 6px;")
@@ -368,45 +359,39 @@ class MainWindow(QMainWindow):
         layout.setSpacing(14)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        # Scheda Riepilogo Impostazioni di Lancio
+        # Scheda Superiore: Avanzamento Analisi e Riepilogo (Compatto ed Elegante)
         self.card_analysis_config = QFrame()
         self.card_analysis_config.setStyleSheet("""
             QFrame {
                 background-color: #1e293b;
                 border-radius: 8px;
-                padding: 14px 18px;
+                padding: 12px 16px;
                 border: 1px solid #334155;
             }
             QLabel {
                 color: #f8fafc;
-                font-size: 13px;
             }
         """)
         l_card = QVBoxLayout(self.card_analysis_config)
-        self.lbl_analysis_title = QLabel("<h3 style='margin:0; color:#38bdf8;'>⚙ Analisi Video in Corso...</h3>")
-        self.lbl_analysis_summary = QLabel("Configurazione: Inizializzazione...")
-        self.lbl_analysis_summary.setStyleSheet("color: #cbd5e1; font-size: 13px; margin-top: 4px;")
-        l_card.addWidget(self.lbl_analysis_title)
-        l_card.addWidget(self.lbl_analysis_summary)
-        layout.addWidget(self.card_analysis_config)
+        l_card.setSpacing(8)
 
-        # Sezione Centrale: Mega Progress Bar & Stato
-        progress_box = QFrame()
-        progress_box.setStyleSheet("""
-            QFrame {
-                background-color: #0f172a;
-                border-radius: 8px;
-                padding: 18px;
-                border: 1px solid #334155;
-            }
-        """)
-        l_prog = QVBoxLayout(progress_box)
-        l_prog.setSpacing(10)
+        # Riga 1: Titolo e stato ETA
+        riga_top = QHBoxLayout()
+        self.lbl_analysis_title = QLabel("<b style='color:#38bdf8; font-size:15px;'>⚙ Analisi Video in Corso...</b>")
+        self.lbl_analysis_eta = QLabel("⏱ Inizializzazione...")
+        self.lbl_analysis_eta.setStyleSheet("font-size: 13px; color: #38bdf8; font-weight: bold;")
+        riga_top.addWidget(self.lbl_analysis_title)
+        riga_top.addStretch()
+        riga_top.addWidget(self.lbl_analysis_eta)
+        l_card.addLayout(riga_top)
 
+        # Riga 2: Task corrente
         self.lbl_analysis_task = QLabel("Inizio scansione file video...")
-        self.lbl_analysis_task.setStyleSheet("font-size: 15px; font-weight: bold; color: #f1f5f9;")
-        l_prog.addWidget(self.lbl_analysis_task)
+        self.lbl_analysis_task.setStyleSheet("font-size: 14px; font-weight: bold; color: #f1f5f9;")
+        l_card.addWidget(self.lbl_analysis_task)
 
+        # Riga 3: Progress Bar e pulsante Interrompi
+        riga_prog = QHBoxLayout()
         self.analysis_progress_bar = QProgressBar()
         self.analysis_progress_bar.setValue(0)
         self.analysis_progress_bar.setStyleSheet("""
@@ -414,29 +399,78 @@ class MainWindow(QMainWindow):
                 border: 1px solid #475569;
                 border-radius: 6px;
                 text-align: center;
-                height: 32px;
-                font-size: 14px;
+                height: 28px;
+                font-size: 13px;
                 font-weight: bold;
                 color: #ffffff;
-                background-color: #1e293b;
+                background-color: #0f172a;
             }
             QProgressBar::chunk {
                 background-color: #0284c7;
                 border-radius: 5px;
             }
         """)
-        l_prog.addWidget(self.analysis_progress_bar)
+        riga_prog.addWidget(self.analysis_progress_bar, stretch=1)
 
-        self.lbl_analysis_eta = QLabel("⏱ Calcolo tempo residuo...")
-        self.lbl_analysis_eta.setStyleSheet("font-size: 13px; color: #38bdf8; font-weight: bold;")
-        l_prog.addWidget(self.lbl_analysis_eta)
+        self.btn_cancel_task = QPushButton("⏹ Interrompi")
+        self.btn_cancel_task.setStyleSheet("""
+            QPushButton {
+                background-color: #dc2626; 
+                color: white; 
+                font-weight: bold; 
+                font-size: 13px;
+                padding: 6px 14px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #b91c1c;
+            }
+        """)
+        self.btn_cancel_task.clicked.connect(self.cancel_current_task)
+        riga_prog.addWidget(self.btn_cancel_task)
+        l_card.addLayout(riga_prog)
 
-        layout.addWidget(progress_box)
+        # Riga 4: Dettagli configurazione compatti
+        self.lbl_analysis_summary = QLabel("Configurazione: Inizializzazione...")
+        self.lbl_analysis_summary.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        l_card.addWidget(self.lbl_analysis_summary)
 
-        # Log Eventi Rilevati (Solo ciò che conta)
-        lbl_log = QLabel("<b>Manovre e Piloti Riconosciuti durante l'ascolto radio:</b>")
-        lbl_log.setStyleSheet("font-size: 13px; color: #cbd5e1;")
-        layout.addWidget(lbl_log)
+        layout.addWidget(self.card_analysis_config)
+
+        # Area Centrale: Splitter con Tabella Revisione Live e Log Radio
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Sezione Tabella Revisione (occupa la parte principale dello splitter)
+        table_container = QWidget()
+        l_table = QVBoxLayout(table_container)
+        l_table.setContentsMargins(0, 0, 0, 0)
+        l_table.setSpacing(6)
+
+        lbl_table_header = QLabel("<b>📋 Registro Voli e Revisione in Tempo Reale:</b> (puoi correggere Pilota/Volo o guardare subito i video)")
+        lbl_table_header.setStyleSheet("font-size: 13px; color: #f1f5f9;")
+        l_table.addWidget(lbl_table_header)
+
+        # Incorporiamo la vista di revisione con tabella
+        self.step3_widget = Step2ReviewView(hide_header=True)
+        self.step3_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
+        self.step3_widget.open_flight_signal.connect(self.open_specific_flight_debriefing)
+        self.step3_widget.back_signal.connect(self.on_review_back_clicked)
+        # Nascondiamo il pulsante indietro interno di Step2ReviewView per pulizia
+        if hasattr(self.step3_widget, 'btn_back'):
+            self.step3_widget.btn_back.setVisible(False)
+        l_table.addWidget(self.step3_widget)
+
+        splitter.addWidget(table_container)
+
+        # Sezione Inferiore: Log comunicazioni radio rilevate (compatto/ridimensionabile)
+        log_container = QWidget()
+        l_log = QVBoxLayout(log_container)
+        l_log.setContentsMargins(0, 0, 0, 0)
+        l_log.setSpacing(4)
+
+        lbl_log = QLabel("<b>📻 Log Comunicazioni Radio Trascritte:</b>")
+        lbl_log.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        l_log.addWidget(lbl_log)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
@@ -445,54 +479,20 @@ class MainWindow(QMainWindow):
                 background-color: #090d16;
                 color: #e2e8f0;
                 font-family: Consolas, monospace;
-                font-size: 13px;
+                font-size: 12px;
                 border-radius: 6px;
                 border: 1px solid #1e293b;
-                padding: 10px;
+                padding: 6px;
             }
         """)
-        layout.addWidget(self.log_text, stretch=1)
+        l_log.addWidget(self.log_text)
 
-        # Pulsanti in Basso: Interrompi o Passa subito a Revisione
-        bottom_bar = QHBoxLayout()
+        splitter.addWidget(log_container)
+        # Distribuzione dimensioni nello splitter: 75% tabella, 25% log
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
 
-        self.btn_cancel_task = QPushButton("⏹ Interrompi Analisi")
-        self.btn_cancel_task.setStyleSheet("""
-            QPushButton {
-                background-color: #dc2626; 
-                color: white; 
-                font-weight: bold; 
-                font-size: 13px;
-                padding: 10px 20px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #b91c1c;
-            }
-        """)
-        self.btn_cancel_task.clicked.connect(self.cancel_current_task)
-        bottom_bar.addWidget(self.btn_cancel_task)
-
-        bottom_bar.addStretch()
-
-        self.btn_view_review_now = QPushButton("📋 Vedi Tabella Revisione (0 clip) ➡")
-        self.btn_view_review_now.setStyleSheet("""
-            QPushButton {
-                background-color: #0f766e; 
-                color: white; 
-                font-weight: bold; 
-                font-size: 14px;
-                padding: 10px 22px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #115e59;
-            }
-        """)
-        self.btn_view_review_now.clicked.connect(lambda: self.go_to_step(2))
-        bottom_bar.addWidget(self.btn_view_review_now)
-
-        layout.addLayout(bottom_bar)
+        layout.addWidget(splitter, stretch=1)
 
     def add_pilot_row(self, nome="", vela="", colore=""):
         row = self.table_pilots.rowCount()
@@ -804,8 +804,6 @@ class MainWindow(QMainWindow):
     def on_clip_analyzed_live(self, match):
         """Riceve in tempo reale ogni clip appena analizzata e la inserisce subito nella tabella di Revisione."""
         self.step3_widget.add_clip_match(match)
-        count = self.step3_widget.table.rowCount()
-        self.btn_view_review_now.setText(f"📋 Vedi Tabella Revisione ({count} clip pronte) ➡")
 
     def cancel_current_task(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
@@ -829,7 +827,7 @@ class MainWindow(QMainWindow):
         self.btn_detect_pilots.setEnabled(True)
         self.lbl_analysis_task.setText("Elaborazione interrotta dall'utente.")
         self.log("<b>Elaborazione interrotta dall'utente.</b>")
-        # Riporta allo Step 1 (Parametri)
+        # Riporta allo Step 0 (Parametri)
         self.go_to_step(0)
 
     def on_progress(self, msg, val):
@@ -851,11 +849,11 @@ class MainWindow(QMainWindow):
     def on_pilots_detected(self, matches):
         self.lbl_bg_activity.setText("✅ Analisi completata")
         self.btn_detect_pilots.setEnabled(True)
+        self.lbl_analysis_task.setText("✅ Tutte le clip sono state analizzate.")
+        self.lbl_analysis_eta.setText("⏱ Completato!")
+        self.btn_cancel_task.setEnabled(False)
         self.detected_matches = self.step3_widget.matches if self.step3_widget.matches else matches
-        # Passa allo Step 3 (Registro Voli) se l'utente non si trova già nell'Aula Debriefing
-        if self.stacked_widget.currentIndex() != 3:
-            self.go_to_step(2)
-        self.status_label.setText("Tutte le clip sono state analizzate. Puoi consultare il Registro Voli o entrare nell'Aula Debriefing.")
+        self.status_label.setText("Analisi completata con successo! Puoi verificare la tabella o entrare subito nell'Aula Debriefing.")
 
     def on_review_back_clicked(self):
         """Se l'analisi è ancora in corso, torna alla schermata di analisi; altrimenti torna ai parametri."""
@@ -937,7 +935,7 @@ class MainWindow(QMainWindow):
 
         first_pilot = pilots_with_flights[0]
         self.step4_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
-        self.go_to_step(3)
+        self.go_to_step(2)
         self.load_pilot_flights_into_hub(first_pilot)
 
     def on_hub_pilot_selected(self, pilot_name: str):
@@ -1031,7 +1029,7 @@ class MainWindow(QMainWindow):
 
         first_pilot = pilots_with_flights[0]
         self.step4_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
-        self.go_to_step(3)
+        self.go_to_step(2)
         self.load_pilot_flights_into_hub(first_pilot)
         self.status_label.setText(f"Sessione caricata in Pure Replay da: {d}")
 
