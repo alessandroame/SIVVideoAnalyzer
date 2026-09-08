@@ -5,7 +5,8 @@
       "name": "Chiusura Asimmetrica Destra",
       "keywords": [
         "asimmetrica a destra", "chiudi a destra", "destra tira", "chiudi destra",
-        "asimmetrica destra", "prendi la destra", "tira la destra", "abbatti la destra"
+        "asimmetrica destra", "prendi la destra", "tira la destra", "abbatti la destra",
+        "chiusura a destra", "chiusura destra", "asimmetrica tenuta a destra", "asimmetrica pilotata"
       ],
       "category": "Asimmetriche"
     },
@@ -14,7 +15,8 @@
       "name": "Chiusura Asimmetrica Sinistra",
       "keywords": [
         "asimmetrica a sinistra", "chiudi a sinistra", "sinistra tira", "chiudi sinistra",
-        "asimmetrica sinistra", "prendi la sinistra", "tira la sinistra", "abbatti la sinistra"
+        "asimmetrica sinistra", "prendi la sinistra", "tira la sinistra", "abbatti la sinistra",
+        "chiusura a sinistra", "chiusura a semistra", "chiusura sinistra", "asimmetrica tenuta a sinistra"
       ],
       "category": "Asimmetriche"
     },
@@ -22,7 +24,8 @@
       "id": "asimmetrica_accelerata",
       "name": "Asimmetrica con Acceleratore",
       "keywords": [
-        "spingi la barra e chiudi", "accelera e chiudi", "speed e asimmetrica", "con acceleratore chiudi"
+        "spingi la barra e chiudi", "accelera e chiudi", "speed e asimmetrica", "con acceleratore chiudi",
+        "metà acceleratore", "con l'acceleratore", "acceleratore e chiudi", "apri con acceleratore"
       ],
       "category": "Asimmetriche"
     },
@@ -30,7 +33,8 @@
       "id": "frontale",
       "name": "Chiusura Frontale",
       "keywords": [
-        "frontale", "chiudi frontale", "tira le a", "tira le due a", "prendi le a", "chiudi al centro"
+        "frontale", "chiudi frontale", "tira le a", "tira le due a", "prendi le a", "chiudi al centro",
+        "per la frontale", "bretelle anteriori", "bel tiro deciso", "chiusura frontale"
       ],
       "category": "Frontali"
     },
@@ -38,9 +42,19 @@
       "id": "orecchie",
       "name": "Grandi Orecchie",
       "keywords": [
-        "fai le orecchie", "prendi le orecchie", "grandi orecchie", "orecchie fuori", "tira le esterne"
+        "fai le orecchie", "prendi le orecchie", "grandi orecchie", "orecchie fuori", "tira le esterne",
+        "grande orecchi", "chiudi le orecchie"
       ],
       "category": "Discesa Rapida"
+    },
+    {
+      "id": "minime_velocita",
+      "name": "Ricerca Minime Velocità",
+      "keywords": [
+        "minime velocità", "minima velocità", "rallenta la vela", "cerca la minima", "frena progressivo",
+        "affonda i comandi", "mantieni le minime", "velocità minima"
+      ],
+      "category": "Velocità & Assetto"
     },
     {
       "id": "spirale",
@@ -62,7 +76,8 @@
       "id": "wingover",
       "name": "Wingover / Rollio",
       "keywords": [
-        "wingover", "inversione di rollio", "rollio", "carica a destra", "inverto", "scambia il peso"
+        "wingover", "inversione di rollio", "rollio", "carica a destra", "inverto", "scambia il peso",
+        "wing over", "inversioni", "scambia e carica", "vai sinistra lascia destra"
       ],
       "category": "Dinamica"
     },
@@ -113,9 +128,18 @@
         "autorotazione", "lascia ruotare", "blocca la rotazione", "contrasta col corpo"
       ],
       "category": "Autorotazioni"
+    },
+    {
+      "id": "circuito_atterraggio",
+      "name": "Circuito di Atterraggio / Smaltimento Quota",
+      "keywords": [
+        "verso l'atterraggio", "base della raccoccita", "base sinistra", "base destra", "mantenimento traiettoria in atterraggio",
+        "torna verso l'atterraggio", "180 destra", "180 sinistra", "smaltimento quota"
+      ],
+      "category": "Atterraggio"
     }
   ],
   "callsigns": [
-    "mi ricevi", "sei pronto", "in box", "pronto per", "via", "adesso", "vai ora", "attenzione", "frena", "lascia"
+    "mi ricevi", "sei pronto", "in box", "pronto per", "via", "adesso", "vai ora", "attenzione", "frena", "lascia", "alessandro", "mantenimento traiettoria"
   ]
 }

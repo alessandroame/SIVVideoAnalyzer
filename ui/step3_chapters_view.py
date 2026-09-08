@@ -2,13 +2,16 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QSlider,
-    QFileDialog, QMessageBox, QTextEdit, QSplitter
+    QFileDialog, QMessageBox, QTextEdit, QSplitter, QComboBox, QFrame
 )
-from PyQt6.QtCore import Qt, QUrl, QTime
+from PyQt6.QtCore import Qt, QUrl, QTime, pyqtSignal
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 class ChaptersView(QWidget):
+    pilot_selected_signal = pyqtSignal(str)
+    back_signal = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.chapters = []
@@ -16,13 +19,56 @@ class ChaptersView(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        main_layout = QHBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(10)
 
+        # Top Bar: Selettore Pilota e Navigazione (Dark theme coerente)
+        top_bar = QFrame()
+        top_bar.setStyleSheet("""
+            QFrame {
+                background-color: #1e293b; 
+                border-radius: 6px; 
+                padding: 6px;
+                border: 1px solid #334155;
+            }
+            QLabel {
+                color: #f1f5f9;
+            }
+        """)
+        l_top = QHBoxLayout(top_bar)
+
+        self.btn_back = QPushButton("⬅ Torna a Revisione Video")
+        self.btn_back.setStyleSheet("padding: 6px 14px; font-size: 13px;")
+        self.btn_back.clicked.connect(self.back_signal.emit)
+        l_top.addWidget(self.btn_back)
+
+        l_top.addSpacing(20)
+        lbl_pilota = QLabel("<b>Seleziona Pilota da Visualizzare:</b>")
+        lbl_pilota.setStyleSheet("font-size: 13px; color: #f1f5f9;")
+        l_top.addWidget(lbl_pilota)
+
+        self.combo_pilots = QComboBox()
+        self.combo_pilots.setMinimumWidth(220)
+        self.combo_pilots.setStyleSheet("padding: 5px; font-size: 13px; font-weight: bold;")
+        self.combo_pilots.currentTextChanged.connect(self.on_pilot_combo_changed)
+        l_top.addWidget(self.combo_pilots)
+
+        l_top.addStretch()
+
+        self.lbl_video_name = QLabel("")
+        self.lbl_video_name.setStyleSheet("color: #94a3b8; font-style: italic;")
+        l_top.addWidget(self.lbl_video_name)
+
+        main_layout.addWidget(top_bar)
+
+        # Splitter principale: Sinistra Player, Destra Capitoli
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Sinistra: Player Video
         player_container = QWidget()
         player_layout = QVBoxLayout(player_container)
+        player_layout.setContentsMargins(0, 0, 0, 0)
 
         self.video_widget = QVideoWidget()
         self.video_widget.setMinimumSize(480, 270)
@@ -37,6 +83,7 @@ class ChaptersView(QWidget):
         # Controlli player
         ctrl_layout = QHBoxLayout()
         self.btn_play_pause = QPushButton("Play")
+        self.btn_play_pause.setStyleSheet("font-weight: bold; min-width: 60px;")
         self.btn_play_pause.clicked.connect(self.toggle_play)
         ctrl_layout.addWidget(self.btn_play_pause)
 
@@ -53,49 +100,64 @@ class ChaptersView(QWidget):
         # Destra: Tabella Capitoli ed Esportazione
         right_container = QWidget()
         right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
 
-        right_layout.addWidget(QLabel("<b>Capitoli Manovre SIV Rilevate</b>"))
+        right_layout.addWidget(QLabel("<b>Capitoli & Manovre SIV (Doppio click per saltare nel video):</b>"))
 
         self.table_chapters = QTableWidget(0, 4)
-        self.table_chapters.setHorizontalHeaderLabels(["Inizio", "Fine", "Manovra", "Frase Radio / Trascrizione"])
+        self.table_chapters.setHorizontalHeaderLabels(["Inizio", "Fine", "Manovra Riconosciuta", "Trascrizione / Comandi Radio"])
         self.table_chapters.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table_chapters.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table_chapters.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table_chapters.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table_chapters.cellDoubleClicked.connect(self.on_chapter_double_clicked)
+        self.table_chapters.setAlternatingRowColors(True)
         right_layout.addWidget(self.table_chapters)
 
         # Pulsanti gestione ed export
         action_layout = QHBoxLayout()
-        self.btn_add_chapter = QPushButton("+ Aggiungi")
+        self.btn_add_chapter = QPushButton("+ Aggiungi Capitolo")
         self.btn_add_chapter.clicked.connect(self.add_manual_chapter)
         action_layout.addWidget(self.btn_add_chapter)
 
-        self.btn_remove_chapter = QPushButton("- Rimuovi")
+        self.btn_remove_chapter = QPushButton("- Rimuovi Selezionato")
         self.btn_remove_chapter.clicked.connect(self.remove_selected_chapter)
         action_layout.addWidget(self.btn_remove_chapter)
 
         action_layout.addStretch()
 
-        self.btn_export_yt = QPushButton("Esporta YouTube / TXT")
-        self.btn_export_yt.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold;")
+        self.btn_export_yt = QPushButton("Esporta Capitoli YouTube / TXT")
+        self.btn_export_yt.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; padding: 6px 14px;")
         self.btn_export_yt.clicked.connect(self.export_youtube)
         action_layout.addWidget(self.btn_export_yt)
 
         right_layout.addLayout(action_layout)
 
         splitter.addWidget(right_container)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 4)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 5)
 
         main_layout.addWidget(splitter)
 
-        # Timer & segnali player
+        # Segnali player
         self.media_player.positionChanged.connect(self.position_changed)
         self.media_player.durationChanged.connect(self.duration_changed)
 
+    def set_pilots_list(self, pilots: list, current_pilot: str = None):
+        self.combo_pilots.blockSignals(True)
+        self.combo_pilots.clear()
+        self.combo_pilots.addItems(pilots)
+        if current_pilot and current_pilot in pilots:
+            self.combo_pilots.setCurrentText(current_pilot)
+        self.combo_pilots.blockSignals(False)
+
+    def on_pilot_combo_changed(self, pilot_name: str):
+        if pilot_name:
+            self.pilot_selected_signal.emit(pilot_name)
+
     def load_video(self, video_path: str):
         self.current_video_path = video_path
+        self.lbl_video_name.setText(os.path.basename(video_path))
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.btn_play_pause.setText("Play")
 
@@ -170,7 +232,6 @@ class ChaptersView(QWidget):
         self.set_chapters(self.chapters)
 
     def export_youtube(self):
-        # Sincronizza modifiche dalla tabella
         for row in range(self.table_chapters.rowCount()):
             name_item = self.table_chapters.item(row, 2)
             if name_item and row < len(self.chapters):

@@ -8,7 +8,7 @@ class TranscriptionSegment:
     text: str
 
 class SIVTranscriber:
-    def __init__(self, model_size: str = "small", device: str = "auto", compute_type: str = "default"):
+    def __init__(self, model_size: str = "base", device: str = "auto", compute_type: str = "default"):
         """
         Inizializza il motore faster-whisper.
         model_size: 'base', 'small', 'medium'
@@ -18,11 +18,16 @@ class SIVTranscriber:
         self.device = device
         self.compute_type = compute_type
         self._model = None
+        self._loaded_model_size = None
+
+    def set_model_size(self, model_size: str):
+        if model_size != self.model_size:
+            self.model_size = model_size
+            self._model = None  # Forza il ricaricamento del nuovo modello
 
     def load_model(self):
-        if self._model is None:
+        if self._model is None or self._loaded_model_size != self.model_size:
             from faster_whisper import WhisperModel
-            # Se auto, prova cuda se c'è torch.cuda o ripiega su cpu con int8
             dev = self.device
             c_type = self.compute_type
             if dev == "auto":
@@ -46,9 +51,10 @@ class SIVTranscriber:
                 cpu_threads=cpu_threads,
                 num_workers=2
             )
+            self._loaded_model_size = self.model_size
         return self._model
 
-    def transcribe(self, audio_path: str, language: str = "it", progress_callback=None) -> List[TranscriptionSegment]:
+    def transcribe(self, audio_path: str, language: str = "it", beam_size: int = 1, progress_callback=None, is_cancelled_callback=None) -> List[TranscriptionSegment]:
         model = self.load_model()
 
         # Prompt contestuale SIV per guidare la rete neurale sul vocabolario specifico del parapendio
@@ -61,22 +67,27 @@ class SIVTranscriber:
             "negativa, autorotazione, radio check, sei in box, pronto per l'esercizio, vai, via, lascia."
         )
 
+        # Attiva VAD Filter per saltare istantaneamente silenzi e rumori di fondo senza parlato
         segments, info = model.transcribe(
             audio_path,
             language=language,
-            beam_size=5,
+            beam_size=beam_size,
             initial_prompt=siv_initial_prompt,
-            vad_filter=False,  # Garantisce che l'intero audio venga processato da 00:00 fino all'ultimo secondo
-            condition_on_previous_text=False,  # Evita loop di allucinazioni o blocchi dopo tratti di silenzio
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+            condition_on_previous_text=False,
             no_speech_threshold=0.6,
             log_prob_threshold=-1.0
         )
         
         result = []
         for s in segments:
+            if is_cancelled_callback and is_cancelled_callback():
+                break
             seg = TranscriptionSegment(start=s.start, end=s.end, text=s.text.strip())
             result.append(seg)
             if progress_callback:
                 progress_callback(seg)
                 
         return result
+
