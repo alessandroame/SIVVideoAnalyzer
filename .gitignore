@@ -1,0 +1,15 @@
+﻿venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.mp4
+*.mov
+*.avi
+*.wav
+*.mp3
+temp/
+output/
+.vscode/
+.idea/

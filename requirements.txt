@@ -1,0 +1,6 @@
+﻿PyQt6>=6.5.0
+faster-whisper>=1.0.0
+imageio-ffmpeg>=0.4.9
+pydub>=0.25.1
+thefuzz>=0.22.1
+dataclasses-json>=0.6.4
