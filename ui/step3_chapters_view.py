@@ -10,11 +10,14 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 class ChaptersView(QWidget):
     pilot_selected_signal = pyqtSignal(str)
+    flight_selected_signal = pyqtSignal(int)
+    save_changes_signal = pyqtSignal()
     back_signal = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.chapters = []
+        self.current_flight = None
         self.current_video_path = None
         self.init_ui()
 
@@ -23,7 +26,7 @@ class ChaptersView(QWidget):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(10)
 
-        # Top Bar: Selettore Pilota e Navigazione (Dark theme coerente)
+        # Top Bar: Selettore Pilota e Selettore Volo (Dark theme coerente)
         top_bar = QFrame()
         top_bar.setStyleSheet("""
             QFrame {
@@ -38,27 +41,38 @@ class ChaptersView(QWidget):
         """)
         l_top = QHBoxLayout(top_bar)
 
-        self.btn_back = QPushButton("⬅ Torna a Revisione Video")
+        self.btn_back = QPushButton("⬅ Torna a Revisione")
         self.btn_back.setStyleSheet("padding: 6px 14px; font-size: 13px;")
         self.btn_back.clicked.connect(self.back_signal.emit)
         l_top.addWidget(self.btn_back)
 
-        l_top.addSpacing(20)
-        lbl_pilota = QLabel("<b>Seleziona Pilota da Visualizzare:</b>")
-        lbl_pilota.setStyleSheet("font-size: 13px; color: #f1f5f9;")
+        l_top.addSpacing(15)
+        lbl_pilota = QLabel("<b>Pilota:</b>")
+        lbl_pilota.setStyleSheet("font-size: 13px; color: #38bdf8;")
         l_top.addWidget(lbl_pilota)
 
         self.combo_pilots = QComboBox()
         self.combo_pilots.setMinimumWidth(220)
         self.combo_pilots.setStyleSheet("padding: 5px; font-size: 13px; font-weight: bold;")
-        self.combo_pilots.currentTextChanged.connect(self.on_pilot_combo_changed)
+        self.combo_pilots.currentIndexChanged.connect(self.on_pilot_combo_changed)
         l_top.addWidget(self.combo_pilots)
+
+        l_top.addSpacing(15)
+        lbl_volo = QLabel("<b>Sessione Volo:</b>")
+        lbl_volo.setStyleSheet("font-size: 13px; color: #38bdf8;")
+        l_top.addWidget(lbl_volo)
+
+        self.combo_flights = QComboBox()
+        self.combo_flights.setMinimumWidth(180)
+        self.combo_flights.setStyleSheet("padding: 5px; font-size: 13px; font-weight: bold;")
+        self.combo_flights.currentIndexChanged.connect(self.on_flight_combo_changed)
+        l_top.addWidget(self.combo_flights)
 
         l_top.addStretch()
 
-        self.lbl_video_name = QLabel("")
-        self.lbl_video_name.setStyleSheet("color: #94a3b8; font-style: italic;")
-        l_top.addWidget(self.lbl_video_name)
+        self.lbl_flight_meta = QLabel("")
+        self.lbl_flight_meta.setStyleSheet("color: #94a3b8; font-style: italic; font-size: 12px;")
+        l_top.addWidget(self.lbl_flight_meta)
 
         main_layout.addWidget(top_bar)
 
@@ -102,10 +116,10 @@ class ChaptersView(QWidget):
         right_layout = QVBoxLayout(right_container)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        right_layout.addWidget(QLabel("<b>Capitoli & Manovre SIV (Doppio click per saltare nel video):</b>"))
+        right_layout.addWidget(QLabel("<b>Manovre del Volo (Doppio click per saltare nel video):</b>"))
 
         self.table_chapters = QTableWidget(0, 4)
-        self.table_chapters.setHorizontalHeaderLabels(["Inizio", "Fine", "Manovra Riconosciuta", "Trascrizione / Comandi Radio"])
+        self.table_chapters.setHorizontalHeaderLabels(["Inizio", "Fine", "Manovra Riconosciuta", "Trascrizione Radio"])
         self.table_chapters.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table_chapters.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table_chapters.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -116,17 +130,22 @@ class ChaptersView(QWidget):
 
         # Pulsanti gestione ed export
         action_layout = QHBoxLayout()
-        self.btn_add_chapter = QPushButton("+ Aggiungi Capitolo")
+        self.btn_add_chapter = QPushButton("+ Aggiungi Nota")
         self.btn_add_chapter.clicked.connect(self.add_manual_chapter)
         action_layout.addWidget(self.btn_add_chapter)
 
-        self.btn_remove_chapter = QPushButton("- Rimuovi Selezionato")
+        self.btn_remove_chapter = QPushButton("- Rimuovi")
         self.btn_remove_chapter.clicked.connect(self.remove_selected_chapter)
         action_layout.addWidget(self.btn_remove_chapter)
 
+        self.btn_save_changes = QPushButton("💾 Salva Modifiche")
+        self.btn_save_changes.setStyleSheet("background-color: #2e7d32; color: white; font-weight: bold;")
+        self.btn_save_changes.clicked.connect(self.save_changes_signal.emit)
+        action_layout.addWidget(self.btn_save_changes)
+
         action_layout.addStretch()
 
-        self.btn_export_yt = QPushButton("Esporta Capitoli YouTube / TXT")
+        self.btn_export_yt = QPushButton("Esporta YouTube / TXT")
         self.btn_export_yt.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; padding: 6px 14px;")
         self.btn_export_yt.clicked.connect(self.export_youtube)
         action_layout.addWidget(self.btn_export_yt)
@@ -146,18 +165,55 @@ class ChaptersView(QWidget):
     def set_pilots_list(self, pilots: list, current_pilot: str = None):
         self.combo_pilots.blockSignals(True)
         self.combo_pilots.clear()
-        self.combo_pilots.addItems(pilots)
-        if current_pilot and current_pilot in pilots:
-            self.combo_pilots.setCurrentText(current_pilot)
+        for p in pilots:
+            if isinstance(p, tuple):
+                name, display_text = p
+                self.combo_pilots.addItem(display_text, name)
+            else:
+                self.combo_pilots.addItem(str(p), str(p))
+                
+        if current_pilot:
+            idx = self.combo_pilots.findData(current_pilot)
+            if idx >= 0:
+                self.combo_pilots.setCurrentIndex(idx)
         self.combo_pilots.blockSignals(False)
 
-    def on_pilot_combo_changed(self, pilot_name: str):
-        if pilot_name:
-            self.pilot_selected_signal.emit(pilot_name)
+    def set_flights_list(self, flights: list, current_flight_number: int = 1):
+        self.combo_flights.blockSignals(True)
+        self.combo_flights.clear()
+        for f in flights:
+            label = f"✈ Volo {f.flight_number} ({len(f.clips)} clip - {len(f.chapters)} manovre)"
+            self.combo_flights.addItem(label, f.flight_number)
+            
+        idx = self.combo_flights.findData(current_flight_number)
+        if idx >= 0:
+            self.combo_flights.setCurrentIndex(idx)
+        self.combo_flights.blockSignals(False)
+
+    def on_pilot_combo_changed(self, index: int):
+        pilot_id = self.combo_pilots.currentData()
+        if pilot_id:
+            self.pilot_selected_signal.emit(pilot_id)
+
+    def on_flight_combo_changed(self, index: int):
+        flight_num = self.combo_flights.currentData()
+        if flight_num is not None:
+            self.flight_selected_signal.emit(flight_num)
+
+    def load_flight(self, flight):
+        self.current_flight = flight
+        self.set_chapters(flight.chapters)
+
+        clip_names = ", ".join(c.filename for c in flight.clips)
+        self.lbl_flight_meta.setText(f"Clip: {clip_names} | Totale: {int(flight.total_duration // 60):02d}:{int(flight.total_duration % 60):02d}")
+
+        if flight.clips:
+            # Carica la prima clip
+            first_clip = flight.clips[0]
+            self.load_video(first_clip.video_path)
 
     def load_video(self, video_path: str):
         self.current_video_path = video_path
-        self.lbl_video_name.setText(os.path.basename(video_path))
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.btn_play_pause.setText("Play")
 
@@ -176,11 +232,18 @@ class ChaptersView(QWidget):
             self.table_chapters.setItem(row, 3, item_text)
 
     def on_chapter_double_clicked(self, row, col):
-        if row < len(self.chapters):
-            start_ms = int(self.chapters[row].start_time * 1000)
-            self.media_player.setPosition(start_ms)
-            self.media_player.play()
-            self.btn_play_pause.setText("Pausa")
+        if row < len(self.chapters) and self.current_flight:
+            target_flight_time = self.chapters[row].start_time
+            clip, local_time = self.current_flight.get_clip_and_local_time(target_flight_time)
+            
+            if clip:
+                if self.current_video_path != clip.video_path:
+                    self.load_video(clip.video_path)
+                    
+                start_ms = int(local_time * 1000)
+                self.media_player.setPosition(start_ms)
+                self.media_player.play()
+                self.btn_play_pause.setText("Pausa")
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:

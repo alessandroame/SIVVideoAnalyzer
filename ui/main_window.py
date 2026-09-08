@@ -1,10 +1,12 @@
-import os
+﻿import os
 import glob
 import time
+import json
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFileDialog, QMessageBox, QProgressBar,
-    QStackedWidget, QTextEdit, QGroupBox, QFrame, QComboBox
+    QStackedWidget, QTextEdit, QGroupBox, QFrame, QComboBox, QTableWidget,
+    QTableWidgetItem, QHeaderView
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 
@@ -12,9 +14,9 @@ from core.audio_extractor import extract_audio
 from core.transcriber import SIVTranscriber
 from core.pilot_detector import PilotDetector, VideoPilotMatch
 from core.file_sorter import FileSorter
-from core.video_concatenator import VideoConcatenator
 from core.maneuver_detector import ManeuverDetector
-from core.timeline_merger import VideoTranscriptionCache, merge_transcriptions_with_offset
+from core.manifest_manager import PilotInfo, SivCourseManifest
+from core.flight_grouper import FlightGrouper, SIVFlight, FlightClipInfo
 from ui.step2_review_view import Step2ReviewView
 from ui.step3_chapters_view import ChaptersView
 
@@ -54,15 +56,18 @@ class WorkerThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SIV Video Analyzer & Manager - Procedura Guidata")
-        self.resize(1150, 780)
+        self.setWindowTitle("SIV Video Analyzer & Manager - Didattica per Volo")
+        self.resize(1200, 800)
 
-        self.transcriber = SIVTranscriber(model_size="small")
+        self.transcriber = SIVTranscriber(model_size="base")
         self.maneuver_detector = ManeuverDetector()
+        self.flight_grouper = FlightGrouper()
+        
         self.detected_matches = []
-        self.sorted_folders = {}
-        self.concatenated_videos = {}
-        self.current_pilot_video = None
+        self.pilots_info: list[PilotInfo] = []
+        self.pilot_flights: dict[str, list[SIVFlight]] = {} # pilot_name -> [SIVFlight]
+        self.current_pilot = None
+        self.current_flight = None
         self.settings = QSettings("SIVVideoAnalyzer", "Settings")
 
         self.init_ui()
@@ -93,8 +98,8 @@ class MainWindow(QMainWindow):
         h_layout.setContentsMargins(15, 5, 15, 5)
 
         self.lbl_step1 = QLabel("1. Configurazione & Riconoscimento")
-        self.lbl_step2 = QLabel("2. Revisione & Smistamento Video")
-        self.lbl_step3 = QLabel("3. Video Montati & Manovre SIV")
+        self.lbl_step2 = QLabel("2. Revisione & Assegnazione per Volo")
+        self.lbl_step3 = QLabel("3. Debriefing Didattico & Player Voli")
 
         h_layout.addWidget(self.lbl_step1)
         h_layout.addWidget(QLabel(" ➔ "))
@@ -102,6 +107,22 @@ class MainWindow(QMainWindow):
         h_layout.addWidget(QLabel(" ➔ "))
         h_layout.addWidget(self.lbl_step3)
         h_layout.addStretch()
+
+        btn_open_replay = QPushButton("📂 Apri Sessione Esistente (Replay)")
+        btn_open_replay.setStyleSheet("""
+            QPushButton {
+                background-color: #0f766e;
+                color: white;
+                font-weight: bold;
+                padding: 5px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #115e59;
+            }
+        """)
+        btn_open_replay.clicked.connect(self.open_existing_replay_folder)
+        h_layout.addWidget(btn_open_replay)
 
         main_layout.addWidget(self.header_frame)
 
@@ -114,15 +135,17 @@ class MainWindow(QMainWindow):
         self.init_step1_widget()
         self.stacked_widget.addWidget(self.step1_widget)
 
-        # Step 2: Tabella Revisione a Schermo Intero
+        # Step 2: Tabella Revisione a Schermo Intero (con Voli)
         self.step2_widget = Step2ReviewView()
-        self.step2_widget.confirmed_signal.connect(self.start_sorting_and_concatenation)
+        self.step2_widget.confirmed_signal.connect(self.on_review_confirmed_enter_debriefing)
         self.step2_widget.back_signal.connect(lambda: self.go_to_step(0))
         self.stacked_widget.addWidget(self.step2_widget)
 
-        # Step 3: Hub Montato & Player Capitoli
+        # Step 3: Hub Debriefing & Player Voli
         self.step3_widget = ChaptersView()
         self.step3_widget.pilot_selected_signal.connect(self.on_hub_pilot_selected)
+        self.step3_widget.flight_selected_signal.connect(self.on_hub_flight_selected)
+        self.step3_widget.save_changes_signal.connect(self.save_flight_changes)
         self.step3_widget.back_signal.connect(lambda: self.go_to_step(1))
         self.stacked_widget.addWidget(self.step3_widget)
 
@@ -167,7 +190,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(self.status_box)
 
-        # Imposta lo step iniziale
         self.go_to_step(0)
 
     def update_stepper_style(self, current_step: int):
@@ -184,10 +206,10 @@ class MainWindow(QMainWindow):
 
     def init_step1_widget(self):
         layout = QVBoxLayout(self.step1_widget)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
-        # Selezione Cartella
-        box_input = QGroupBox("Cartella Video Sorgente")
+        # Selezione Cartella Sorgente Video
+        box_input = QGroupBox("Cartella Video Sorgente (supporta schede SD Sony .MTS/.MXF/MP4)")
         l_in = QHBoxLayout(box_input)
         self.txt_source_dir = QLineEdit()
         self.txt_source_dir.setPlaceholderText("Seleziona la cartella contenente i video del corso SIV...")
@@ -197,18 +219,35 @@ class MainWindow(QMainWindow):
         l_in.addWidget(btn_browse_src)
         layout.addWidget(box_input)
 
-        # Lista Piloti del Corso (Opzionale ma consigliata)
-        box_pilots = QGroupBox("Lista Nomi Piloti del Corso (consigliata per matching radio perfetto)")
+        # Gestione Piloti del Corso con Modello Vela e Colori
+        box_pilots = QGroupBox("Anagrafica Piloti del Corso (Vela e Colori per identificazione e memoria chiavetta)")
         l_pilots = QVBoxLayout(box_pilots)
-        self.txt_pilots = QLineEdit()
-        self.txt_pilots.setPlaceholderText("Es: Marco Rossi, Luca Bianchi, Andrea, Sara...")
-        l_pilots.addWidget(self.txt_pilots)
+
+        self.table_pilots = QTableWidget(0, 3)
+        self.table_pilots.setHorizontalHeaderLabels(["Nome e Cognome Pilota", "Modello Vela (es. Rush 6)", "Colori Vela (es. Rosso/Nero)"])
+        self.table_pilots.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table_pilots.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table_pilots.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table_pilots.setMaximumHeight(130)
+        l_pilots.addWidget(self.table_pilots)
+
+        pilot_btn_layout = QHBoxLayout()
+        btn_add_p = QPushButton("+ Aggiungi Pilota")
+        btn_add_p.clicked.connect(self.add_pilot_row)
+        pilot_btn_layout.addWidget(btn_add_p)
+
+        btn_del_p = QPushButton("- Rimuovi Selezionato")
+        btn_del_p.clicked.connect(self.remove_pilot_row)
+        pilot_btn_layout.addWidget(btn_del_p)
+        pilot_btn_layout.addStretch()
+
+        l_pilots.addLayout(pilot_btn_layout)
         layout.addWidget(box_pilots)
 
         # Cartella di Output e Modalità Modello Whisper
         row_config = QHBoxLayout()
 
-        box_output = QGroupBox("Cartella di Destinazione (Output)")
+        box_output = QGroupBox("Cartella di Destinazione (Output Portatile / Chiavetta USB)")
         l_out = QHBoxLayout(box_output)
         self.txt_output_dir = QLineEdit()
         self.txt_output_dir.setText(os.path.abspath("output_siv"))
@@ -232,6 +271,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("<b>Log Operazioni:</b>"))
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
+        self.log_text.setMaximumHeight(100)
         layout.addWidget(self.log_text)
 
         # Pulsante di Azione Primario e Gestione Cache
@@ -273,8 +313,33 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_action_layout)
 
+    def add_pilot_row(self, nome="", vela="", colore=""):
+        row = self.table_pilots.rowCount()
+        self.table_pilots.insertRow(row)
+        self.table_pilots.setItem(row, 0, QTableWidgetItem(nome))
+        self.table_pilots.setItem(row, 1, QTableWidgetItem(vela))
+        self.table_pilots.setItem(row, 2, QTableWidgetItem(colore))
+
+    def remove_pilot_row(self):
+        current_row = self.table_pilots.currentRow()
+        if current_row >= 0:
+            self.table_pilots.removeRow(current_row)
+            self.save_settings()
+
+    def get_pilots_from_table(self) -> list[PilotInfo]:
+        pilots = []
+        for r in range(self.table_pilots.rowCount()):
+            nome_item = self.table_pilots.item(r, 0)
+            vela_item = self.table_pilots.item(r, 1)
+            colore_item = self.table_pilots.item(r, 2)
+            nome = nome_item.text().strip() if nome_item else ""
+            if nome:
+                vela = vela_item.text().strip() if vela_item else ""
+                colore = colore_item.text().strip() if colore_item else ""
+                pilots.append(PilotInfo(id=nome.lower().replace(" ", "_"), nome=nome, vela_marca_modello=vela, colori_vela=colore))
+        return pilots
+
     def clear_cache(self):
-        """Elimina i file di cache JSON e WAV dalla cartella temp."""
         temp_dir = "temp"
         if not os.path.exists(temp_dir):
             QMessageBox.information(self, "Cache Vuota", "Nessun file di cache presente.")
@@ -315,10 +380,6 @@ class MainWindow(QMainWindow):
         if saved_src and os.path.exists(saved_src):
             self.txt_source_dir.setText(saved_src)
 
-        saved_pilots = self.settings.value("pilots", "")
-        if saved_pilots:
-            self.txt_pilots.setText(saved_pilots)
-
         saved_out = self.settings.value("output_dir", "")
         if saved_out:
             self.txt_output_dir.setText(saved_out)
@@ -329,17 +390,49 @@ class MainWindow(QMainWindow):
             self.combo_model.setCurrentIndex(idx)
         self.transcriber.set_model_size(saved_model)
 
-        # Collega i segnali di salvataggio automatico solo ORA che i campi sono stati popolati
+        # Carica tabella piloti
+        pilots_json = self.settings.value("pilots_json", "")
+        self.table_pilots.setRowCount(0)
+        if pilots_json:
+            try:
+                p_list = json.loads(pilots_json)
+                for p in p_list:
+                    self.add_pilot_row(p.get('nome', ''), p.get('vela', ''), p.get('colore', ''))
+            except Exception:
+                pass
+
+        if self.table_pilots.rowCount() == 0:
+            # Fallback su vecchi settings
+            old_pilots = self.settings.value("pilots", "")
+            if old_pilots:
+                for p in old_pilots.split(","):
+                    if p.strip():
+                        self.add_pilot_row(p.strip(), "", "")
+
+        # Collega i segnali di salvataggio automatico DOPO il caricamento
         self.txt_source_dir.textChanged.connect(self.save_settings)
-        self.txt_pilots.textChanged.connect(self.save_settings)
         self.txt_output_dir.textChanged.connect(self.save_settings)
         self.combo_model.currentIndexChanged.connect(self.on_model_changed)
+        self.table_pilots.itemChanged.connect(lambda: self.save_settings())
 
     def save_settings(self):
         self.settings.setValue("source_dir", self.txt_source_dir.text().strip())
-        self.settings.setValue("pilots", self.txt_pilots.text().strip())
         self.settings.setValue("output_dir", self.txt_output_dir.text().strip())
         self.settings.setValue("whisper_model", self.combo_model.currentData() or "base")
+
+        # Salva piloti della tabella in formato JSON
+        p_data = []
+        for r in range(self.table_pilots.rowCount()):
+            n = self.table_pilots.item(r, 0)
+            v = self.table_pilots.item(r, 1)
+            c = self.table_pilots.item(r, 2)
+            if n and n.text().strip():
+                p_data.append({
+                    'nome': n.text().strip(),
+                    'vela': v.text().strip() if v else '',
+                    'colore': c.text().strip() if c else ''
+                })
+        self.settings.setValue("pilots_json", json.dumps(p_data))
         self.settings.sync()
 
     def closeEvent(self, event):
@@ -365,10 +458,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Attenzione", "Seleziona una cartella sorgente valida.")
             return
 
-        pilots_raw = self.txt_pilots.text().split(",")
-        pilots = [p.strip() for p in pilots_raw if p.strip()]
+        self.pilots_info = self.get_pilots_from_table()
+        pilot_names = [p.nome for p in self.pilots_info]
 
-        # Supporto esteso formati video inclusi i formati Sony AVCHD (.MTS, .M2TS) e XAVC (.MXF, .MP4)
         video_extensions = {
             ".mp4", ".mov", ".avi", ".mkv", 
             ".mts", ".m2ts", ".mxf", ".ts",
@@ -382,7 +474,6 @@ class MainWindow(QMainWindow):
                 if ext in video_extensions:
                     video_files.append(os.path.join(root, file))
 
-        # Rimuovi duplicati e ordina
         video_files = sorted(list(set(video_files)))
 
         if not video_files:
@@ -396,7 +487,7 @@ class MainWindow(QMainWindow):
         self.btn_detect_pilots.setEnabled(False)
 
         def task(progress_sig, is_cancelled):
-            detector = PilotDetector(pilots_list=pilots, transcriber=self.transcriber)
+            detector = PilotDetector(pilots_list=pilot_names, transcriber=self.transcriber)
             matches = []
             total = len(video_files)
             start_wall_time = time.time()
@@ -452,8 +543,22 @@ class MainWindow(QMainWindow):
                     return matches
                 matches.append(m)
 
+            # Raggruppa provvisoriamente per numero di volo per ciascun pilota
+            pilot_map = {}
+            for m in matches:
+                pilot_map.setdefault(m.detected_pilot, []).append(m)
+
+            grouper = FlightGrouper()
+            for p, p_matches in pilot_map.items():
+                p_flights = grouper.group_pilot_matches_into_flights(p, p_matches)
+                for f in p_flights:
+                    clip_fnames = {c.filename for c in f.clips}
+                    for m in p_matches:
+                        if m.filename in clip_fnames:
+                            m.flight_number = f.flight_number
+
             total_elapsed = int(time.time() - start_wall_time)
-            progress_sig.emit(f"Riconoscimento piloti completato in {total_elapsed // 60:02d}m {total_elapsed % 60:02d}s!", 100)
+            progress_sig.emit(f"Riconoscimento completato in {total_elapsed // 60:02d}m {total_elapsed % 60:02d}s!", 100)
             return matches
 
         self.worker = WorkerThread(task)
@@ -464,7 +569,6 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def cancel_current_task(self):
-        """Richiede l'interruzione del task in background."""
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.status_label.setText("Interruzione in corso...")
             self.btn_cancel_task.setEnabled(False)
@@ -488,118 +592,183 @@ class MainWindow(QMainWindow):
         self.btn_detect_pilots.setEnabled(True)
         self.detected_matches = matches
 
-        pilots_raw = self.txt_pilots.text().split(",")
-        pilots = [p.strip() for p in pilots_raw if p.strip()]
+        pilot_names = [p.nome for p in self.pilots_info]
 
-        # Passa allo Step 2 (Schermata Revisione)
-        self.step2_widget.set_data(matches, pilots_list=pilots)
+        # Passa allo Step 2 (Schermata Revisione con Voli)
+        self.step2_widget.set_data(matches, pilots_list=pilot_names)
         self.go_to_step(1)
-        self.status_label.setText("Verifica l'assegnazione dei video ai piloti e clicca 'Conferma e Crea Video Montati'.")
+        self.status_label.setText("Verifica piloti e numeri di volo, poi clicca 'Conferma ed Entra nel Debriefing'.")
 
-    def start_sorting_and_concatenation(self):
-        """Esegue smistamento fisico e montaggio per pilota."""
+    def on_review_confirmed_enter_debriefing(self):
+        """
+        Salva i dati dell'output portatile (manifest e cartelle volo) ed entra
+        immediatamente nello Step 3 (Live Debriefing) SENZA attendere alcun montaggio video!
+        """
         out_dir = self.txt_output_dir.text().strip() or "output_siv"
-        sorter = FileSorter(base_output_dir=out_dir)
-        self.sorted_folders = sorter.sort_videos(self.detected_matches, move=False)
+        os.makedirs(out_dir, exist_ok=True)
 
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.btn_cancel_task.setVisible(True)
+        # 1. Salva il manifest del corso
+        manifest = SivCourseManifest(
+            nome_corso=f"Corso SIV - {time.strftime('%B %Y')}",
+            data_inizio=time.strftime("%Y-%m-%d"),
+            piloti=self.pilots_info
+        )
+        manifest.save(out_dir)
 
-        def task(progress_sig, is_cancelled):
-            concatenator = VideoConcatenator()
-            concatenated_videos = {}
-            total = len(self.sorted_folders)
-            start_wall_time = time.time()
+        # 2. Raggruppa i video per pilota e per numero di volo
+        pilot_groups = {}
+        for m in self.detected_matches:
+            pilot_groups.setdefault(m.detected_pilot, []).append(m)
 
-            for i, (pilot, files) in enumerate(self.sorted_folders.items()):
-                if is_cancelled():
-                    progress_sig.emit("Concatenazione interrotta dall'utente.", 0)
-                    return concatenated_videos
+        self.pilot_flights = {}
+        grouper = FlightGrouper()
 
-                pct = int((i / total) * 100)
-                elapsed = time.time() - start_wall_time
-                if i > 0:
-                    est_total = (elapsed / i) * total
-                    rem = max(0.0, est_total - elapsed)
-                    m_rem = int(rem // 60)
-                    s_rem = int(rem % 60)
-                    eta_str = f" | Tempo residuo stimato: {m_rem:02d}m {s_rem:02d}s"
-                else:
-                    eta_str = " | Calcolo tempo residuo..."
+        for pilot_name, matches in pilot_groups.items():
+            # Raggruppa in base al volo selezionato dall'utente
+            by_flight_num = {}
+            for m in matches:
+                f_num = getattr(m, 'flight_number', 1) or 1
+                by_flight_num.setdefault(f_num, []).append(m)
 
-                progress_sig.emit(f"Concatenazione pilota {i+1}/{total} ({pilot}){eta_str}", pct)
-                sorted_files = sorted(files, key=lambda f: os.path.getmtime(f))
-                pilot_folder = os.path.join(out_dir, pilot)
-                montati_folder = os.path.join(pilot_folder, "montati")
-                os.makedirs(montati_folder, exist_ok=True)
-                merged_output = os.path.join(montati_folder, f"{pilot}_Corso_SIV_Montato.mp4")
-                concatenator.concatenate_videos(sorted_files, merged_output)
-                concatenated_videos[pilot] = merged_output
+            flights = []
+            for f_num in sorted(by_flight_num.keys()):
+                m_list = by_flight_num[f_num]
+                f_objs = grouper.group_pilot_matches_into_flights(pilot_name, m_list)
+                if f_objs:
+                    f = f_objs[0]
+                    f.flight_number = f_num
+                    f.flight_id = f"Volo_{f_num:02d}"
+                    flights.append(f)
 
-            total_elapsed = int(time.time() - start_wall_time)
-            progress_sig.emit(f"Concatenazione completata in {total_elapsed // 60:02d}m {total_elapsed % 60:02d}s!", 100)
-            return concatenated_videos
+            self.pilot_flights[pilot_name] = flights
 
-        self.worker = WorkerThread(task)
-        self.worker.progress_signal.connect(self.on_progress)
-        self.worker.finished_signal.connect(self.on_concatenation_done)
-        self.worker.cancelled_signal.connect(self.on_task_cancelled)
-        self.worker.error_signal.connect(self.on_error)
-        self.worker.start()
+            # Salva i metadati e capitoli nella cartella del volo dell'output per portabilità
+            pilot_dir = os.path.join(out_dir, pilot_name)
+            for f in flights:
+                flight_dir = os.path.join(pilot_dir, f.flight_id)
+                f.save_to_folder(flight_dir)
 
-    def on_concatenation_done(self, concatenated_videos):
-        self.progress_bar.setVisible(False)
-        self.btn_cancel_task.setVisible(False)
-        self.concatenated_videos = concatenated_videos
-
-        pilots_with_video = list(concatenated_videos.keys())
-        if not pilots_with_video:
-            QMessageBox.warning(self, "Attenzione", "Nessun video montato generato.")
+        # 3. Prepara lo Step 3
+        pilots_with_flights = list(self.pilot_flights.keys())
+        if not pilots_with_flights:
+            QMessageBox.warning(self, "Attenzione", "Nessun pilota con voli disponibile.")
             return
 
-        # Configura lo Step 3 con la lista dei piloti
-        first_pilot = pilots_with_video[0]
-        self.step3_widget.set_pilots_list(pilots_with_video, current_pilot=first_pilot)
+        # Popola la lista piloti formattata (con vela e colore)
+        p_info_map = {p.nome: p for p in self.pilots_info}
+        display_pilots = []
+        for p_name in pilots_with_flights:
+            if p_name in p_info_map:
+                p = p_info_map[p_name]
+                desc = f"{p.nome}"
+                if p.vela_marca_modello:
+                    desc += f" [{p.vela_marca_modello}"
+                    if p.colori_vela:
+                        desc += f" - {p.colori_vela}"
+                    desc += "]"
+                display_pilots.append((p_name, desc))
+            else:
+                display_pilots.append((p_name, p_name))
+
+        first_pilot = pilots_with_flights[0]
+        self.step3_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
         self.go_to_step(2)
-        self.load_pilot_into_hub(first_pilot)
+        self.load_pilot_flights_into_hub(first_pilot)
 
     def on_hub_pilot_selected(self, pilot_name: str):
-        self.load_pilot_into_hub(pilot_name)
+        self.load_pilot_flights_into_hub(pilot_name)
 
-    def load_pilot_into_hub(self, pilot_name: str):
-        vpath = self.concatenated_videos.get(pilot_name)
-        if not vpath or not os.path.exists(vpath):
+    def on_hub_flight_selected(self, flight_number: int):
+        flights = self.pilot_flights.get(self.current_pilot, [])
+        for f in flights:
+            if f.flight_number == flight_number:
+                self.current_flight = f
+                self.step3_widget.load_flight(f)
+                self.status_label.setText(f"Caricato Volo {f.flight_number} di '{self.current_pilot}' ({len(f.clips)} clip, {len(f.chapters)} manovre).")
+                break
+
+    def load_pilot_flights_into_hub(self, pilot_name: str):
+        self.current_pilot = pilot_name
+        flights = self.pilot_flights.get(pilot_name, [])
+        if not flights:
+            self.step3_widget.set_flights_list([])
             return
 
-        self.current_pilot_video = vpath
-        self.step3_widget.load_video(vpath)
+        self.step3_widget.set_flights_list(flights, current_flight_number=flights[0].flight_number)
+        self.current_flight = flights[0]
+        self.step3_widget.load_flight(flights[0])
+        self.status_label.setText(f"Caricato Volo {flights[0].flight_number} di '{pilot_name}'.")
 
-        # Ricomponi istantaneamente i capitoli tramite cache
-        pilot_matches_map = {m.filename: m for m in self.detected_matches}
-        matched_caches = []
-        if pilot_name in self.sorted_folders:
-            sorted_files = sorted(self.sorted_folders[pilot_name], key=lambda f: os.path.getmtime(f))
-            for sf in sorted_files:
-                fname = os.path.basename(sf)
-                if fname in pilot_matches_map and pilot_matches_map[fname].segments:
-                    m = pilot_matches_map[fname]
-                    c = VideoTranscriptionCache(
-                        video_path=sf,
-                        filename=fname,
-                        duration=m.duration,
-                        segments=m.segments
-                    )
-                    matched_caches.append(c)
+    def save_flight_changes(self):
+        if not self.current_flight:
+            return
 
-        if matched_caches:
-            segments = merge_transcriptions_with_offset(matched_caches)
-            chapters = self.maneuver_detector.detect_chapters(segments)
-            self.step3_widget.set_chapters(chapters)
-            self.status_label.setText(f"Video montato di '{pilot_name}' caricato: {len(chapters)} capitoli / manovre pronte.")
-        else:
-            self.step3_widget.set_chapters([])
-            self.status_label.setText(f"Video montato di '{pilot_name}' caricato.")
+        # Sincronizza i capitoli dalla tabella
+        table = self.step3_widget.table_chapters
+        for row in range(table.rowCount()):
+            name_item = table.item(row, 2)
+            if name_item and row < len(self.current_flight.chapters):
+                self.current_flight.chapters[row].maneuver_name = name_item.text().strip()
+
+        out_dir = self.txt_output_dir.text().strip() or "output_siv"
+        pilot_dir = os.path.join(out_dir, self.current_pilot)
+        flight_dir = os.path.join(pilot_dir, self.current_flight.flight_id)
+        self.current_flight.save_to_folder(flight_dir)
+
+        QMessageBox.information(self, "Salvataggio Completato", f"Modifiche salvate con successo in:\n{flight_dir}")
+
+    def open_existing_replay_folder(self):
+        """Apre un output o memory stick esistente ed entra subito in modalità Pure Replay."""
+        d = QFileDialog.getExistingDirectory(self, "Seleziona cartella corso SIV esistente (su PC o Chiavetta USB)")
+        if not d:
+            return
+
+        manifest = SivCourseManifest.load(d)
+        if manifest:
+            self.pilots_info = manifest.piloti
+
+        # Cerca tutti i voli salvati
+        self.pilot_flights = {}
+        for entry in os.scandir(d):
+            if entry.is_dir():
+                pilot_name = entry.name
+                flights = []
+                for sub in os.scandir(entry.path):
+                    if sub.is_dir() and sub.name.startswith("Volo_"):
+                        f = SIVFlight.load_from_folder(sub.path)
+                        if f:
+                            flights.append(f)
+                if flights:
+                    flights.sort(key=lambda x: x.flight_number)
+                    self.pilot_flights[pilot_name] = flights
+
+        if not self.pilot_flights:
+            QMessageBox.warning(self, "Nessun Volo Trovato", "Nessun dato di volo trovato nella cartella selezionata.")
+            return
+
+        self.txt_output_dir.setText(d)
+        pilots_with_flights = list(self.pilot_flights.keys())
+
+        p_info_map = {p.nome: p for p in self.pilots_info}
+        display_pilots = []
+        for p_name in pilots_with_flights:
+            if p_name in p_info_map:
+                p = p_info_map[p_name]
+                desc = f"{p.nome}"
+                if p.vela_marca_modello:
+                    desc += f" [{p.vela_marca_modello}"
+                    if p.colori_vela:
+                        desc += f" - {p.colori_vela}"
+                    desc += "]"
+                display_pilots.append((p_name, desc))
+            else:
+                display_pilots.append((p_name, p_name))
+
+        first_pilot = pilots_with_flights[0]
+        self.step3_widget.set_pilots_list(display_pilots, current_pilot=first_pilot)
+        self.go_to_step(2)
+        self.load_pilot_flights_into_hub(first_pilot)
+        self.status_label.setText(f"Sessione caricata in Pure Replay da: {d}")
 
     def on_error(self, err_msg):
         self.progress_bar.setVisible(False)

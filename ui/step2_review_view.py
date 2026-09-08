@@ -1,7 +1,7 @@
 ﻿import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QLabel, QHeaderView, QComboBox, QFrame
+    QPushButton, QLabel, QHeaderView, QComboBox, QFrame, QSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -20,7 +20,7 @@ class Step2ReviewView(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        # Header informativo (dark theme coerente con contrasto elevato)
+        # Header informativo
         info_box = QFrame()
         info_box.setStyleSheet("""
             QFrame {
@@ -34,29 +34,31 @@ class Step2ReviewView(QWidget):
             }
         """)
         l_info = QVBoxLayout(info_box)
-        lbl_title = QLabel("<h2>Revisione e Assegnazione Video</h2>")
+        lbl_title = QLabel("<h2>Revisione Video & Assegnazione per Volo</h2>")
         lbl_title.setStyleSheet("color: #38bdf8; font-weight: bold; margin-bottom: 2px;")
         lbl_desc = QLabel(
-            "Verifica l'associazione rilevata dall'ascolto radio per ciascun video del corso.<br>"
-            "Puoi correggere il pilota assegnato tramite il menu a tendina o digitare un nuovo nome pilota prima di procedere al montaggio."
+            "Verifica l'associazione del pilota e il <b>Numero di Volo</b> assegnato alle clip.<br>"
+            "Lo stesso volo può raggruppare più video consecutivi. Correggi pilota o numero di volo prima di entrare nel debriefing."
         )
         lbl_desc.setStyleSheet("color: #cbd5e1; font-size: 13px;")
         l_info.addWidget(lbl_title)
         l_info.addWidget(lbl_desc)
         layout.addWidget(info_box)
 
-        # Tabella Video Assegnati
-        self.table = QTableWidget(0, 4)
+        # Tabella Video Assegnati con colonna VOLO
+        self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels([
             "File Video Sorgente", 
-            "Pilota Rilevato / Assegnato", 
+            "Pilota Assegnato", 
+            "Volo N°",
             "Confidenza Radio", 
             "Frasi Radio Chiave Riconosciute"
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
 
@@ -69,7 +71,7 @@ class Step2ReviewView(QWidget):
 
         btn_layout.addStretch()
 
-        self.btn_confirm = QPushButton("Conferma e Crea Video Montati per Pilota ➡")
+        self.btn_confirm = QPushButton("Conferma ed Entra nel Debriefing / Replay ➡")
         self.btn_confirm.setStyleSheet(
             "background-color: #2e7d32; color: white; font-weight: bold; font-size: 13px; padding: 10px 22px; border-radius: 4px;"
         )
@@ -86,10 +88,12 @@ class Step2ReviewView(QWidget):
 
         self.table.setRowCount(len(matches))
         for row, match in enumerate(matches):
+            # Colonna 0: File sorgente
             file_item = QTableWidgetItem(match.filename)
             file_item.setFlags(file_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 0, file_item)
 
+            # Colonna 1: ComboBox Pilota
             combo = QComboBox()
             all_pilots = list(dict.fromkeys(self.pilots_list + [match.detected_pilot]))
             combo.addItems(all_pilots)
@@ -99,20 +103,33 @@ class Step2ReviewView(QWidget):
             combo.setEditable(True)
             self.table.setCellWidget(row, 1, combo)
 
+            # Colonna 2: SpinBox Numero di Volo
+            spin_volo = QSpinBox()
+            spin_volo.setRange(1, 99)
+            flight_num = getattr(match, 'flight_number', 1) or 1
+            spin_volo.setValue(flight_num)
+            spin_volo.setStyleSheet("padding: 3px; font-weight: bold;")
+            self.table.setCellWidget(row, 2, spin_volo)
+
+            # Colonna 3: Confidenza
             conf_percent = f"{int(match.confidence * 100)}%"
             conf_item = QTableWidgetItem(conf_percent)
             conf_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             conf_item.setFlags(conf_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 2, conf_item)
+            self.table.setItem(row, 3, conf_item)
 
+            # Colonna 4: Frasi Rilevate
             phrases_text = " | ".join(match.matched_phrases) if match.matched_phrases else "Nessuna chiamata radio esplicita"
             phrases_item = QTableWidgetItem(phrases_text)
             phrases_item.setFlags(phrases_item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.table.setItem(row, 3, phrases_item)
+            self.table.setItem(row, 4, phrases_item)
 
     def on_confirm(self):
         for row, match in enumerate(self.matches):
             combo = self.table.cellWidget(row, 1)
+            spin = self.table.cellWidget(row, 2)
             if combo:
                 match.detected_pilot = combo.currentText().strip() or "Da Assegnare"
+            if spin:
+                match.flight_number = spin.value()
         self.confirmed_signal.emit()
