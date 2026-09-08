@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QFileDialog, QMessageBox, QProgressBar,
     QTabWidget, QTextEdit, QListWidget, QGroupBox
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 
 from core.audio_extractor import extract_audio
 from core.transcriber import SIVTranscriber
@@ -47,8 +47,10 @@ class MainWindow(QMainWindow):
         self.detected_matches = []
         self.sorted_folders = {}
         self.current_pilot_video = None
+        self.settings = QSettings("SIVVideoAnalyzer", "Settings")
 
         self.init_ui()
+        self.load_settings()
 
     def init_ui(self):
         central_widget = QWidget()
@@ -88,6 +90,7 @@ class MainWindow(QMainWindow):
         l_in = QHBoxLayout(box_input)
         self.txt_source_dir = QLineEdit()
         self.txt_source_dir.setPlaceholderText("Seleziona la cartella contenente i video del corso SIV...")
+        self.txt_source_dir.textChanged.connect(self.save_settings)
         l_in.addWidget(self.txt_source_dir)
         btn_browse_src = QPushButton("Sfoglia...")
         btn_browse_src.clicked.connect(self.browse_source_dir)
@@ -99,6 +102,7 @@ class MainWindow(QMainWindow):
         l_pilots = QVBoxLayout(box_pilots)
         self.txt_pilots = QLineEdit()
         self.txt_pilots.setPlaceholderText("Es: Marco Rossi, Luca Bianchi, Andrea, Sara...")
+        self.txt_pilots.textChanged.connect(self.save_settings)
         l_pilots.addWidget(self.txt_pilots)
         layout.addWidget(box_pilots)
 
@@ -107,6 +111,7 @@ class MainWindow(QMainWindow):
         l_out = QHBoxLayout(box_output)
         self.txt_output_dir = QLineEdit()
         self.txt_output_dir.setText(os.path.abspath("output_siv"))
+        self.txt_output_dir.textChanged.connect(self.save_settings)
         l_out.addWidget(self.txt_output_dir)
         btn_browse_out = QPushButton("Sfoglia...")
         btn_browse_out.clicked.connect(self.browse_output_dir)
@@ -143,17 +148,45 @@ class MainWindow(QMainWindow):
     def log(self, msg: str):
         self.log_text.append(msg)
 
+    def load_settings(self):
+        """Carica le ultime impostazioni usate (cartelle e lista piloti)."""
+        saved_src = self.settings.value("source_dir", "")
+        if saved_src and os.path.exists(saved_src):
+            self.txt_source_dir.setText(saved_src)
+
+        saved_pilots = self.settings.value("pilots", "")
+        if saved_pilots:
+            self.txt_pilots.setText(saved_pilots)
+
+        saved_out = self.settings.value("output_dir", "")
+        if saved_out:
+            self.txt_output_dir.setText(saved_out)
+
+    def save_settings(self):
+        """Salva in modo persistente le cartelle e i piloti inseriti."""
+        self.settings.setValue("source_dir", self.txt_source_dir.text().strip())
+        self.settings.setValue("pilots", self.txt_pilots.text().strip())
+        self.settings.setValue("output_dir", self.txt_output_dir.text().strip())
+
+    def closeEvent(self, event):
+        """Salva le impostazioni prima di chiudere la finestra."""
+        self.save_settings()
+        super().closeEvent(event)
+
     def browse_source_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "Seleziona cartella video sorgente")
+        d = QFileDialog.getExistingDirectory(self, "Seleziona cartella video sorgente", self.txt_source_dir.text().strip() or "")
         if d:
             self.txt_source_dir.setText(d)
+            self.save_settings()
 
     def browse_output_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "Seleziona cartella di destinazione")
+        d = QFileDialog.getExistingDirectory(self, "Seleziona cartella di destinazione", self.txt_output_dir.text().strip() or "")
         if d:
             self.txt_output_dir.setText(d)
+            self.save_settings()
 
     def start_pilot_detection(self):
+        self.save_settings()
         src = self.txt_source_dir.text().strip()
         if not src or not os.path.exists(src):
             QMessageBox.warning(self, "Attenzione", "Seleziona una cartella sorgente valida.")
