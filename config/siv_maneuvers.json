@@ -1,22 +1,13 @@
 {
   "maneuvers": [
     {
-      "id": "asimmetrica_destra",
-      "name": "Chiusura Asimmetrica Destra",
+      "id": "asimmetrica",
+      "name": "Chiusura Asimmetrica",
       "keywords": [
-        "asimmetrica a destra", "chiudi a destra", "destra tira", "chiudi destra",
-        "asimmetrica destra", "prendi la destra", "tira la destra", "abbatti la destra",
-        "chiusura a destra", "chiusura destra", "asimmetrica tenuta a destra", "asimmetrica pilotata"
-      ],
-      "category": "Asimmetriche"
-    },
-    {
-      "id": "asimmetrica_sinistra",
-      "name": "Chiusura Asimmetrica Sinistra",
-      "keywords": [
-        "asimmetrica a sinistra", "chiudi a sinistra", "sinistra tira", "chiudi sinistra",
-        "asimmetrica sinistra", "prendi la sinistra", "tira la sinistra", "abbatti la sinistra",
-        "chiusura a sinistra", "chiusura a semistra", "chiusura sinistra", "asimmetrica tenuta a sinistra"
+        "asimmetrica", "chiusura asimmetrica", "chiudi a destra", "chiudi a sinistra",
+        "chiudi destra", "chiudi sinistra", "tira la destra", "tira la sinistra",
+        "abbatti la destra", "abbatti la sinistra", "chiusura a destra", "chiusura a sinistra",
+        "chiusura destra", "chiusura sinistra", "asimmetrica tenuta", "asimmetrica pilotata"
       ],
       "category": "Asimmetriche"
     },

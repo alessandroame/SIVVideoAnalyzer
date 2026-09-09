@@ -69,17 +69,15 @@ class SIVTranscriber:
             "stessa cosa, altra volta, 3 2 1 via tira deciso."
         )
 
-        # Attiva VAD Filter per saltare istantaneamente silenzi e rumori di fondo senza parlato
+        # Disattivato vad_filter: il VAD (Silero) nei corsi SIV interpreta il fruscio del vento
+        # e le lunghe pause tra le manovre come silenzio totale, tagliando l'audio dopo pochi secondi.
         segments, info = model.transcribe(
             audio_path,
             language=language,
             beam_size=beam_size,
             initial_prompt=siv_initial_prompt,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
-            condition_on_previous_text=False,
-            no_speech_threshold=0.6,
-            log_prob_threshold=-1.0
+            vad_filter=False,
+            condition_on_previous_text=False
         )
         
         result = []

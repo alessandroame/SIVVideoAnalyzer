@@ -92,3 +92,54 @@ class TestManifestAndFlights(unittest.TestCase):
         self.assertEqual(len(flights[0].clips), 2)
         self.assertEqual(flights[1].flight_number, 2)
         self.assertEqual(len(flights[1].clips), 1)
+
+    def test_maneuver_worker_progress(self):
+        from ui.maneuver_worker import ManeuverCalculationWorker
+        from unittest.mock import MagicMock
+        from core.transcriber import TranscriptionSegment
+        from core.sidecar_manager import SidecarData
+        from core.pilot_detector import VideoTranscriptionCache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_mp4 = os.path.join(tmpdir, "test_clip.mp4")
+            with open(test_mp4, "wb") as f:
+                f.write(b"fake_mp4_bytes")
+
+            # Crea cache fittizia
+            os.makedirs("temp", exist_ok=True)
+            cache_file = os.path.join("temp", "test_clip_cache.json")
+            cache_data = VideoTranscriptionCache(
+                video_path=test_mp4,
+                filename="test_clip.mp4",
+                duration=30.0,
+                segments=[
+                    TranscriptionSegment(start=2.0, end=6.0, text="Ok chiudi asimmetrica a destra tieni l'appoggio")
+                ]
+            )
+            cache_data.save(cache_file)
+
+            worker = ManeuverCalculationWorker(
+                video_path=test_mp4,
+                transcriber=MagicMock(),
+                maneuver_detector=None,
+                pilot_names=["Test Pilot"]
+            )
+
+            progress_events = []
+            worker.progress_update.connect(lambda vp, txt, pct: progress_events.append((vp, txt, pct)))
+
+            results = []
+            worker.maneuvers_ready.connect(lambda vp, chs: results.append((vp, chs)))
+
+            worker.run()
+
+            # Pulisci cache creata
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+
+            self.assertTrue(len(progress_events) >= 2)
+            self.assertEqual(progress_events[-1][2], 100)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0][0], test_mp4)
+            self.assertTrue(len(results[0][1]) >= 1)
+            self.assertIn("Asimmetrica", results[0][1][0]["title"])

@@ -17,10 +17,13 @@ class VideoPilotMatch:
     duration: float = 0.0
     flight_number: Optional[int] = None
     segments: List[TranscriptionSegment] = None
+    wing_colors: List[Dict[str, str]] = None
 
     def __post_init__(self):
         if self.segments is None:
             self.segments = []
+        if self.wing_colors is None:
+            self.wing_colors = []
 
 class PilotDetector:
     def __init__(self, pilots_list: Optional[List[str]] = None, transcriber: Optional[SIVTranscriber] = None):

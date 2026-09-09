@@ -2,7 +2,7 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QSlider, QFrame, QSplitter
+    QHeaderView, QSlider, QFrame, QSplitter, QProgressBar
 )
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -10,6 +10,9 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from core.sidecar_manager import SidecarData
 from ui.add_chapter_dialog import AddChapterQuickDialog
+from ui.detect_engine_dialog import DetectManeuversEngineDialog
+from ui.transcription_inspector_dialog import TranscriptionInspectorDialog
+from ui.wing_color_inspector_dialog import WingColorInspectorDialog
 
 class SIVVideoWidget(QVideoWidget):
     """QVideoWidget con gestione integrata della tastiera in modalità a tutto schermo."""
@@ -51,6 +54,7 @@ class DebriefingPlayerWidget(QWidget):
     """Componente autonomo per l'Aula Debriefing (Player video & Timeline Capitoli)."""
     back_to_table_requested = pyqtSignal()
     export_current_flight_requested = pyqtSignal()
+    detect_maneuvers_requested = pyqtSignal(str, str)  # video_path, model_name
 
     def __init__(self, maneuver_detector=None, parent=None):
         super().__init__(parent)
@@ -220,6 +224,31 @@ class DebriefingPlayerWidget(QWidget):
         lbl_ch_title.setStyleSheet("font-size: 11px; font-weight: 700; color: #38bdf8; letter-spacing: 0.5px;")
         r_layout.addWidget(lbl_ch_title)
 
+        # Status & Progresso Rilevamento Manovre
+        self.lbl_maneuver_status = QLabel("")
+        self.lbl_maneuver_status.setStyleSheet("font-size: 11px; font-weight: 600; color: #fbbf24;")
+        self.lbl_maneuver_status.setWordWrap(True)
+        self.lbl_maneuver_status.setVisible(False)
+        r_layout.addWidget(self.lbl_maneuver_status)
+
+        self.prog_maneuver = QProgressBar()
+        self.prog_maneuver.setRange(0, 100)
+        self.prog_maneuver.setFixedHeight(8)
+        self.prog_maneuver.setTextVisible(False)
+        self.prog_maneuver.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #1e293b;
+                border-radius: 4px;
+                background-color: #0b111e;
+            }
+            QProgressBar::chunk {
+                background-color: #06b6d4;
+                border-radius: 3px;
+            }
+        """)
+        self.prog_maneuver.setVisible(False)
+        r_layout.addWidget(self.prog_maneuver)
+
         self.table_chapters = QTableWidget(0, 2)
         self.table_chapters.setHorizontalHeaderLabels(["Tempo", "Manovra"])
         self.table_chapters.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -228,22 +257,74 @@ class DebriefingPlayerWidget(QWidget):
         self.table_chapters.cellDoubleClicked.connect(self._on_chapter_clicked)
         r_layout.addWidget(self.table_chapters)
 
-        btn_add_ch = QPushButton("➕ Segna Manovra qui")
-        btn_add_ch.setStyleSheet("""
+        self.btn_detect_maneuvers = QPushButton("🎯 Rileva Manovre...")
+        self.btn_detect_maneuvers.setStyleSheet("""
             QPushButton {
                 padding: 10px;
                 font-weight: 700;
                 font-size: 13px;
-                background-color: #0891b2;
+                background-color: #0284c7;
                 color: white;
                 border: none;
                 border-radius: 8px;
             }
-            QPushButton:hover { background-color: #06b6d4; }
-            QPushButton:pressed { background-color: #0e7490; }
+            QPushButton:hover { background-color: #0369a1; }
+            QPushButton:pressed { background-color: #075985; }
+        """)
+        self.btn_detect_maneuvers.setToolTip("Scegli il motore Whisper ed esegui il rilevamento automatico dei comandi radio e delle manovre.")
+        self.btn_detect_maneuvers.clicked.connect(self._on_detect_maneuvers_clicked)
+        r_layout.addWidget(self.btn_detect_maneuvers)
+
+        btn_add_ch = QPushButton("➕ Segna Manovra qui")
+        btn_add_ch.setStyleSheet("""
+            QPushButton {
+                padding: 9px;
+                font-weight: 600;
+                font-size: 12px;
+                background-color: #1e293b;
+                color: #cbd5e1;
+                border: 1px solid #334155;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #334155; color: #ffffff; }
+            QPushButton:pressed { background-color: #0f172a; }
         """)
         btn_add_ch.clicked.connect(self._add_chapter_here)
         r_layout.addWidget(btn_add_ch)
+
+        self.btn_inspect_transcription = QPushButton("🔍 Leggi Trascrizione Whisper")
+        self.btn_inspect_transcription.setStyleSheet("""
+            QPushButton {
+                padding: 7px;
+                font-weight: 600;
+                font-size: 11px;
+                background-color: transparent;
+                color: #94a3b8;
+                border: 1px dashed #334155;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #1e293b; color: #38bdf8; border-color: #38bdf8; }
+        """)
+        self.btn_inspect_transcription.setToolTip("Visualizza la trascrizione esatta riconosciuta da Whisper per capire quali parole radio sono state captate.")
+        self.btn_inspect_transcription.clicked.connect(self._on_inspect_transcription_clicked)
+        r_layout.addWidget(self.btn_inspect_transcription)
+
+        self.btn_inspect_wing_color = QPushButton("🎨 Diagnostica Colori Vela")
+        self.btn_inspect_wing_color.setStyleSheet("""
+            QPushButton {
+                padding: 7px;
+                font-weight: 600;
+                font-size: 11px;
+                background-color: transparent;
+                color: #94a3b8;
+                border: 1px dashed #334155;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #1e293b; color: #f59e0b; border-color: #f59e0b; }
+        """)
+        self.btn_inspect_wing_color.setToolTip("Ispeziona i fotogrammi estratti, i pixel campionati e i colori identificati per questa vela.")
+        self.btn_inspect_wing_color.clicked.connect(self._on_inspect_wing_color_clicked)
+        r_layout.addWidget(self.btn_inspect_wing_color)
 
         splitter.addWidget(right_panel)
         splitter.setSizes([840, 320])
@@ -251,6 +332,23 @@ class DebriefingPlayerWidget(QWidget):
 
         self.media_player.positionChanged.connect(self._on_player_pos_changed)
         self.media_player.durationChanged.connect(lambda dur: self.slider.setRange(0, dur))
+
+    def set_maneuver_progress(self, video_path: str, text: str, percent: int):
+        if self.current_video_path == video_path:
+            self.lbl_maneuver_status.setVisible(True)
+            self.lbl_maneuver_status.setText(f"⏳ {text}")
+            if percent < 100:
+                self.prog_maneuver.setVisible(True)
+                self.prog_maneuver.setValue(percent)
+                self.lbl_maneuver_status.setStyleSheet("font-size: 11px; font-weight: 600; color: #fbbf24;")
+            else:
+                self.prog_maneuver.setVisible(False)
+                self.lbl_maneuver_status.setStyleSheet("font-size: 11px; font-weight: 600; color: #10b981;")
+                self.lbl_maneuver_status.setText(f"✅ {text}")
+
+    def hide_maneuver_progress(self):
+        self.lbl_maneuver_status.setVisible(False)
+        self.prog_maneuver.setVisible(False)
 
     def open_video(self, video_path: str):
         self.current_video_path = video_path
@@ -263,12 +361,20 @@ class DebriefingPlayerWidget(QWidget):
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.media_player.play()
         self.btn_play.setText("⏸ Pausa")
+        if self.current_sidecar.chapters:
+            self.hide_maneuver_progress()
+        else:
+            self.set_maneuver_progress(video_path, "In attesa rilevamento manovre...", 10)
         self.refresh_chapters_table()
 
     def update_chapters(self, video_path: str, chapters: list):
         if self.current_video_path == video_path:
             if self.current_sidecar:
                 self.current_sidecar.chapters = chapters
+            if chapters:
+                self.set_maneuver_progress(video_path, f"{len(chapters)} manovre pronte", 100)
+            else:
+                self.set_maneuver_progress(video_path, "Nessuna manovra rilevata", 100)
             self.refresh_chapters_table()
 
     def refresh_chapters_table(self):
@@ -293,6 +399,35 @@ class DebriefingPlayerWidget(QWidget):
         self.media_player.setPosition(start_ms)
         self.media_player.play()
         self.btn_play.setText("⏸ Pausa")
+
+    def _on_detect_maneuvers_clicked(self):
+        if not self.current_video_path:
+            return
+        dlg = DetectManeuversEngineDialog(parent=self)
+        if dlg.exec():
+            selected_model = dlg.selected_model
+            self.set_maneuver_progress(self.current_video_path, f"Avvio rilevamento ({selected_model})...", 10)
+            self.detect_maneuvers_requested.emit(self.current_video_path, selected_model)
+
+    def _on_inspect_transcription_clicked(self):
+        if not self.current_video_path:
+            return
+        dlg = TranscriptionInspectorDialog(
+            video_path=self.current_video_path,
+            maneuver_detector=self.maneuver_detector,
+            parent=self
+        )
+        dlg.seek_requested.connect(self.media_player.setPosition)
+        dlg.exec()
+
+    def _on_inspect_wing_color_clicked(self):
+        if not self.current_video_path:
+            return
+        dlg = WingColorInspectorDialog(
+            video_path=self.current_video_path,
+            parent=self
+        )
+        dlg.exec()
 
     def _add_chapter_here(self):
         if not self.current_sidecar:

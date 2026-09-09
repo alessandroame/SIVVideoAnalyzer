@@ -1,0 +1,255 @@
+{
+  "maneuvers": [
+    {
+      "id": "asimmetrica",
+      "name": "Chiusura Asimmetrica",
+      "category": "Asimmetriche",
+      "keywords": [
+        "asimmetrica",
+        "chiusura asimmetrica",
+        "chiudi a destra",
+        "chiudi a sinistra",
+        "chiudi destra",
+        "chiudi sinistra",
+        "tira la destra",
+        "tira la sinistra",
+        "abbatti la destra",
+        "abbatti la sinistra",
+        "chiusura a destra",
+        "chiusura a sinistra",
+        "chiusura destra",
+        "chiusura sinistra",
+        "asimmetrica tenuta",
+        "asimmetrica pilotata"
+      ]
+    },
+    {
+      "id": "asimmetrica_accelerata",
+      "name": "Asimmetrica con Acceleratore",
+      "category": "Asimmetriche",
+      "keywords": [
+        "spingi la barra e chiudi",
+        "accelera e chiudi",
+        "speed e asimmetrica",
+        "con acceleratore chiudi",
+        "metà acceleratore",
+        "con l'acceleratore",
+        "acceleratore e chiudi",
+        "apri con acceleratore"
+      ]
+    },
+    {
+      "id": "frontale",
+      "name": "Chiusura Frontale",
+      "category": "Frontali",
+      "keywords": [
+        "frontale",
+        "chiudi frontale",
+        "tira le a",
+        "tira le due a",
+        "prendi le a",
+        "chiudi al centro",
+        "per la frontale",
+        "bretelle anteriori",
+        "bel tiro deciso",
+        "chiusura frontale"
+      ]
+    },
+    {
+      "id": "orecchie",
+      "name": "Grandi Orecchie",
+      "category": "Discesa Rapida",
+      "keywords": [
+        "fai le orecchie",
+        "prendi le orecchie",
+        "grandi orecchie",
+        "orecchie fuori",
+        "tira le esterne",
+        "grande orecchi",
+        "chiudi le orecchie"
+      ]
+    },
+    {
+      "id": "minime_velocita",
+      "name": "Ricerca Minime Velocità",
+      "category": "Velocità & Assetto",
+      "keywords": [
+        "minime velocità",
+        "minima velocità",
+        "rallenta la vela",
+        "cerca la minima",
+        "frena progressivo",
+        "affonda i comandi",
+        "mantieni le minime",
+        "velocità minima"
+      ]
+    },
+    {
+      "id": "spirale",
+      "name": "Spirale Picchiata / Vite",
+      "category": "Spirale",
+      "keywords": [
+        "entra in vite",
+        "vite picchiata",
+        "spirale",
+        "butta dentro in spirale",
+        "chiudi il raggio",
+        "accelera in vite"
+      ]
+    },
+    {
+      "id": "uscita_spirale",
+      "name": "Uscita da Spirale",
+      "category": "Spirale",
+      "keywords": [
+        "esci dalla vite",
+        "dissipa la vite",
+        "uscita progressiva dalla vite",
+        "uscita da spirale",
+        "dissipa la spirale"
+      ]
+    },
+    {
+      "id": "wingover",
+      "name": "Wingover / Rollio",
+      "category": "Dinamica",
+      "keywords": [
+        "wingover",
+        "inversione di rollio",
+        "inversioni di rollio",
+        "carica a destra",
+        "scambia il peso",
+        "wing over",
+        "scambia e carica",
+        "vai sinistra lascia destra"
+      ]
+    },
+    {
+      "id": "delfinaggio",
+      "name": "Delfinaggio / Pitching",
+      "category": "Dinamica",
+      "keywords": [
+        "delfinaggio",
+        "fai delfinaggio",
+        "innesca il beccheggio",
+        "lascia picchiare",
+        "frena quando passa davanti",
+        "controlla il tuffo"
+      ]
+    },
+    {
+      "id": "b_stall",
+      "name": "B-Stall",
+      "category": "Stalli",
+      "keywords": [
+        "stallo di b",
+        "b-stall",
+        "tira le b",
+        "prendi le b",
+        "mantieni le b",
+        "rilascia le b"
+      ]
+    },
+    {
+      "id": "full_stall",
+      "name": "Full Stall / Stallo Pieno",
+      "category": "Stalli",
+      "keywords": [
+        "full stall",
+        "stallo pieno",
+        "tutto giù i freni",
+        "sfonda i freni",
+        "tieni giù",
+        "cerca lo stallo"
+      ]
+    },
+    {
+      "id": "backfly",
+      "name": "Backfly / Cerca la Retrocessione",
+      "category": "Stalli",
+      "keywords": [
+        "backfly",
+        "porta in backfly",
+        "fai respirare la vela",
+        "cerca il volo rovescio",
+        "apri leggermente i freni"
+      ]
+    },
+    {
+      "id": "spin_negativa",
+      "name": "Spin / Negativa",
+      "category": "Autorotazioni",
+      "keywords": [
+        "negativa",
+        "spin",
+        "stallo d'ala",
+        "sfonda solo a destra",
+        "sfonda solo a sinistra",
+        "innesco negativa"
+      ]
+    },
+    {
+      "id": "autorotazione",
+      "name": "Autorotazione Controllata",
+      "category": "Autorotazioni",
+      "keywords": [
+        "autorotazione",
+        "lascia ruotare",
+        "blocca la rotazione",
+        "contrasta col corpo"
+      ]
+    },
+    {
+      "id": "circuito_atterraggio",
+      "name": "Circuito di Atterraggio / Smaltimento Quota",
+      "category": "Atterraggio",
+      "keywords": [
+        "verso l'atterraggio",
+        "base della raccoccita",
+        "base sinistra",
+        "base destra",
+        "mantenimento traiettoria in atterraggio",
+        "torna verso l'atterraggio",
+        "180 destra",
+        "180 sinistra",
+        "smaltimento quota"
+      ]
+    }
+  ],
+  "enabled_ids": [
+    "asimmetrica",
+    "spirale",
+    "frontale",
+    "delfinaggio",
+    "backfly",
+    "full_stall",
+    "orecchie",
+    "uscita_spirale",
+    "spin_negativa",
+    "wingover",
+    "asimmetrica_accelerata",
+    "minime_velocita",
+    "autorotazione",
+    "b_stall",
+    "circuito_atterraggio"
+  ],
+  "repeat_phrases": [
+    "fanne un'altra",
+    "facciamone un'altra",
+    "fanne un altra",
+    "facciamone un altra",
+    "riproviamo",
+    "riprova",
+    "ancora una",
+    "falla ancora",
+    "rifalla",
+    "un'altra uguale",
+    "un altra uguale",
+    "stessa cosa",
+    "ripeti",
+    "altra volta",
+    "falla di nuovo",
+    "facciamo la stessa",
+    "ancora una volta"
+  ]
+}

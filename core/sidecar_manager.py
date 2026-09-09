@@ -125,6 +125,16 @@ class SidecarData:
     def recorded_at(self, value: str):
         self.data["metadata"]["recorded_at"] = value.strip()
 
+    @property
+    def wing_colors(self) -> List[Dict[str, str]]:
+        return self.data.get("metadata", {}).get("wing_colors", [])
+
+    @wing_colors.setter
+    def wing_colors(self, colors: List[Dict[str, str]]):
+        if "metadata" not in self.data:
+            self.data["metadata"] = {}
+        self.data["metadata"]["wing_colors"] = colors
+
     def add_chapter(self, title: str, start: float, end: float, notes: str = "", command: str = ""):
         self.data["chapters"].append({
             "title": title,

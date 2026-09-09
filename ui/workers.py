@@ -5,6 +5,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from core.sidecar_manager import SidecarData
 from core.pilot_detector import PilotDetector, VideoPilotMatch, VideoTranscriptionCache
 from core.maneuver_detector import ManeuverDetector
+from core.wing_color_detector import detect_wing_colors_from_video, match_detected_colors_to_pilots
 
 class AnalysisWorker(QThread):
     clip_analyzed = pyqtSignal(object)              # emette VideoPilotMatch appena pronto
@@ -12,11 +13,13 @@ class AnalysisWorker(QThread):
     overall_progress = pyqtSignal(str, int)         # eta_text, percent_globale
     status_update = pyqtSignal(str)
     maneuvers_ready = pyqtSignal(str, list)         # video_path, list of chapters
+    maneuver_progress = pyqtSignal(str, str, int)   # video_path, status_text, percent
 
-    def __init__(self, video_files, pilot_names, transcriber, priority_video=None, maneuver_detector=None):
+    def __init__(self, video_files, pilot_names, transcriber, priority_video=None, maneuver_detector=None, pilot_gliders=None):
         super().__init__()
         self.video_files = list(video_files)
         self.pilot_names = pilot_names
+        self.pilot_gliders = pilot_gliders or {}
         self.transcriber = transcriber
         self.priority_video = priority_video
         self.maneuver_detector = maneuver_detector or ManeuverDetector()
@@ -35,19 +38,24 @@ class AnalysisWorker(QThread):
         try:
             sc = SidecarData(video_path)
             if sc.chapters:
+                self.maneuver_progress.emit(video_path, f"{len(sc.chapters)} manovre caricate", 100)
                 self.maneuvers_ready.emit(video_path, sc.chapters)
                 return
 
+            self.maneuver_progress.emit(video_path, "Verifica cache trascrizione...", 20)
             base_name = os.path.splitext(os.path.basename(video_path))[0]
             cache_file = os.path.join("temp", f"{base_name}_cache.json")
             cached = VideoTranscriptionCache.load(cache_file)
             segments = []
             if cached and cached.segments:
                 segments = cached.segments
+                self.maneuver_progress.emit(video_path, "Trascrizione trovata in cache", 40)
             else:
+                self.maneuver_progress.emit(video_path, "Ascolto radio istruttore (Whisper)...", 30)
                 m = detector.identify_pilot_from_audio(video_path)
                 segments = getattr(m, "segments", [])
 
+            self.maneuver_progress.emit(video_path, "Analisi parole chiave manovre...", 70)
             if segments:
                 detected_chaps = man_detector.detect_chapters(segments)
                 ch_dicts = []
@@ -61,9 +69,14 @@ class AnalysisWorker(QThread):
                     })
                 sc.chapters = ch_dicts
                 sc.save()
+                self.maneuver_progress.emit(video_path, f"{len(ch_dicts)} manovre rilevate", 100)
                 self.maneuvers_ready.emit(video_path, ch_dicts)
+            else:
+                self.maneuver_progress.emit(video_path, "Nessun comando radio rilevato", 100)
+                self.maneuvers_ready.emit(video_path, [])
         except Exception as e:
             print(f"[Worker] Errore calcolo manovre su {video_path}: {e}")
+            self.maneuver_progress.emit(video_path, "Errore analisi manovre", 100)
 
     def run(self):
         detector = PilotDetector(pilots_list=self.pilot_names, transcriber=self.transcriber)
@@ -101,7 +114,8 @@ class AnalysisWorker(QThread):
                     confidence=calc_conf,
                     matched_phrases=phr_list,
                     duration=0.0,
-                    flight_number=sc.flight_number
+                    flight_number=sc.flight_number,
+                    wing_colors=sc.wing_colors
                 )
                 self.clip_analyzed.emit(m)
                 self.clip_progress.emit(vf, 100.0, 100.0)
@@ -123,6 +137,25 @@ class AnalysisWorker(QThread):
                 if self._is_cancelled:
                     return
 
+                # Rilevamento cromatico vela (Wing Color Detector)
+                detected_cols = detect_wing_colors_from_video(vf, duration=m.duration)
+                if detected_cols:
+                    sc.wing_colors = [{"name": c[0], "hex": c[1]} for c in detected_cols]
+                    m.wing_colors = sc.wing_colors
+
+                # Fallback cromatico se il pilota non è stato rilevato via radio
+                if (not m.detected_pilot or m.detected_pilot in ["In attesa...", "Da Assegnare"]) and detected_cols and self.pilot_gliders:
+                    color_match = match_detected_colors_to_pilots(detected_cols, self.pilot_gliders)
+                    if color_match:
+                        matched_pilot_key, col_conf = color_match
+                        # Trova il nome con casing originale
+                        for orig_p in self.pilot_names:
+                            if orig_p.lower() == matched_pilot_key.lower():
+                                m.detected_pilot = orig_p
+                                m.confidence = col_conf
+                                m.matched_phrases.append(f"Matching Visivo Colore Vela: {', '.join([c[0] for c in detected_cols])}")
+                                break
+
                 sc.pilot_name = m.detected_pilot
                 sc.flight_number = m.flight_number or 1
                 sc.confidence = m.confidence
@@ -134,6 +167,7 @@ class AnalysisWorker(QThread):
                 self.clip_progress.emit(vf, 100.0, 100.0)
 
                 if hasattr(m, "segments") and m.segments:
+                    self.maneuver_progress.emit(vf, "Analisi parole chiave manovre...", 70)
                     chaps = man_detector.detect_chapters(m.segments)
                     if chaps:
                         sc.chapters = [{
@@ -144,7 +178,11 @@ class AnalysisWorker(QThread):
                             "notes": ch.category
                         } for ch in chaps]
                         sc.save()
+                        self.maneuver_progress.emit(vf, f"{len(chaps)} manovre rilevate", 100)
                         self.maneuvers_ready.emit(vf, sc.chapters)
+                    else:
+                        self.maneuver_progress.emit(vf, "Nessuna manovra rilevata", 100)
+                        self.maneuvers_ready.emit(vf, [])
 
             except Exception as e:
                 print(f"[Worker] Errore su {fname}: {e}")

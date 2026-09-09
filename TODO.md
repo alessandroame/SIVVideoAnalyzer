@@ -2,23 +2,31 @@
 
 ## 🚀 Prossimi Sviluppi & Feature Pianificate
 
-### 1. Rilevamento Intelligente Clip Già Analizzate (Startup & Cache)
-- [ ] **Scansione Preventiva Rapida**: All'inserimento della cartella video, controllare la presenza di file sidecar `.siv.json` o cache `temp/`.
-- [ ] **Feedback Chiave per l'Istruttore**: Segnalare chiaramente lo stato (es. *"8 clip su 10 già pronte"*).
-- [ ] **Opzione Salto / Analisi Selettiva**: Consentire di cliccare *"Analizza solo i mancanti"* o *"Apri direttamente registro"* risparmiando tempo di trascrizione Whisper.
-
-### 2. Wing Color Detector (Matching Vela & Supporto Visivo)
-- [ ] **Modulo `core/wing_color_detector.py`**: Estrazione rapida frame chiave (15%, 30%, 50% durata).
-- [ ] **Filtraggio Cielo/Sfondo**: Estrazione palette cromatica dominante in spazio colore HSV.
-- [ ] **Badge Cromatico nel Registro**: Mostrare un pallino/badge con i colori principali della vela nella tabella voli.
-- [ ] **Fallback Assegnazione**: Supporto per assegnare le clip "Da Assegnare" quando la voce radio è coperta dal fruscio del vento.
-
-### 3. Modalità "Apri Sessione Esistente (Replay)"
-- [ ] **Pulsante dedicato nella Welcome Card**: Consente di aprire direttamente una cartella o chiavetta USB con video e metadati già pronti, passando subito al Registro Voli senza riconfigurare i piloti.
+*Nessuna lavorazione pendente. Tutti gli obiettivi operativi della roadmap sono stati completati.*
 
 ---
 
 ## ✅ Funzionalità Completate & Consolidate
+
+- [x] **Feedback & Progressione Live Rilevamento Manovre & Selezione Engine**:
+  - Tasto **🎯 Rileva Manovre...** dedicato nel player video di debriefing con finestra di selezione engine/modello Whisper (`small`, `medium`, `large-v3`).
+  - Segnalazione dello stato e avanzamento percentuale del rilevamento manovre sia nel player video di debriefing che nella tabella voli.
+  - Indicatore di avanzamento sottile (`QProgressBar` e stato testuale es. *"⏳ Ascolto radio istruttore (Whisper)..."* $\rightarrow$ *"✅ X manovre rilevate"*) nel pannello **CAPITOLI & MANOVRE** del player.
+  - Badge reattivo con conteggio e stato nel pulsante Debriefing della tabella voli (`▶ Guarda (3)` o `⏳ 70%`), con tooltip descrittivo dello stato corrente.
+  - Thread worker on-demand dedicato [`ManeuverCalculationWorker`](file:///c:/github/SIVVideoAnalyzer/ui/maneuver_worker.py) con supporto a forzatura ricalcolo e pipeline [`AnalysisWorker`](file:///c:/github/SIVVideoAnalyzer/ui/workers.py) sincronizzati via segnali PyQt6.
+  - Classificazione manovre unificata: rimossa la distinzione destra/sinistra (es. *"Chiusura Asimmetrica"*) per evitare complessità inutile e massimizzare l'accuratezza del matching radio.
+
+- [x] **Wing Color Detector (Matching Vela & Supporto Visivo)**:
+  - Modulo [`core/wing_color_detector.py`](file:///c:/github/SIVVideoAnalyzer/core/wing_color_detector.py) con campionamento frame FFmpeg ultra-rapido (senza OpenCV/PIL).
+  - Filtraggio dello sfondo (cielo/lago) e categorizzazione HSV dei colori saturi.
+  - Widget [`GliderBadgeWidget`](file:///c:/github/SIVVideoAnalyzer/ui/components/glider_badge.py) con pallini cromatici visivi nella tabella voli.
+  - Fallback intelligente di assegnazione pilota basato sul colore della vela se la radio è assente o disturbata dal vento.
+
+- [x] **Rilevamento Intelligente Clip Già Analizzate (Startup & Cache)**:
+  - Scansione preventiva rapida in [`core/session_scanner.py`](file:///c:/github/SIVVideoAnalyzer/core/session_scanner.py).
+  - Feedback visuale dinamico nella Welcome Card con conteggio clip pronte e pendenti.
+  - Avvio intelligente che instrada al worker solo le clip mancanti, risparmiando tempo di trascrizione Whisper.
+  - Auto-importazione dei piloti e delle vele dai metadati sidecar esistenti con un clic.
 
 - [x] **Architettura Dual-Mode Reattiva (Material Design 3)**:
   - Welcome & Setup $\leftrightarrow$ **Registro Voli Live** (Tabella Streaming) $\leftrightarrow$ **Debriefing Room** (Player Video & Capitoli).

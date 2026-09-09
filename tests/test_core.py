@@ -17,7 +17,7 @@ class TestCore(unittest.TestCase):
         self.assertGreaterEqual(len(chapters), 3)
         
         maneuver_names = [ch.maneuver_name for ch in chapters]
-        self.assertTrue(any("Asimmetrica Destra" in name for name in maneuver_names))
+        self.assertTrue(any("Asimmetrica" in name for name in maneuver_names))
         self.assertTrue(any("Full Stall" in name for name in maneuver_names))
         self.assertTrue(any("Orecchie" in name for name in maneuver_names))
 
@@ -34,8 +34,8 @@ class TestCore(unittest.TestCase):
 
         chapters = detector.detect_chapters(segments, min_score=70)
         self.assertEqual(len(chapters), 2)
-        self.assertEqual(chapters[0].maneuver_id, "asimmetrica_destra")
-        self.assertEqual(chapters[1].maneuver_id, "asimmetrica_destra")
+        self.assertEqual(chapters[0].maneuver_id, "asimmetrica")
+        self.assertEqual(chapters[1].maneuver_id, "asimmetrica")
         self.assertGreater(chapters[1].start_time, chapters[0].start_time)
         # Il secondo capitolo deve aver agganciato il comando esecutivo 3, 2, 1 tira deciso
         self.assertEqual(chapters[1].start_time, 40.0)
@@ -59,8 +59,8 @@ class TestCore(unittest.TestCase):
     def test_custom_maneuvers_filtering(self):
         """Verifica che disabilitare manovre ne impedisca il rilevamento."""
         detector = ManeuverDetector()
-        # Abilita solo asimmetrica destra, escludi frontale
-        detector.enabled_maneuver_ids = {"asimmetrica_destra"}
+        # Abilita solo asimmetrica, escludi frontale
+        detector.enabled_maneuver_ids = {"asimmetrica"}
 
         segments = [
             TranscriptionSegment(start=10.0, end=14.0, text="Prova una chiusura asimmetrica a destra"),
@@ -69,7 +69,7 @@ class TestCore(unittest.TestCase):
 
         chapters = detector.detect_chapters(segments, min_score=70)
         self.assertEqual(len(chapters), 1)
-        self.assertEqual(chapters[0].maneuver_id, "asimmetrica_destra")
+        self.assertEqual(chapters[0].maneuver_id, "asimmetrica")
 
     def test_pilot_detection_from_segments(self):
         detector = PilotDetector(pilots_list=["Marco Rossi", "Luca Bianchi", "Giulia Verdi"])

@@ -11,6 +11,7 @@ from core.sidecar_manager import SidecarData
 from core.audio_extractor import get_formatted_video_datetime
 from core.pilot_detector import VideoPilotMatch
 from ui.components import ensure_arrow_icons
+from ui.components.glider_badge import GliderBadgeWidget
 
 ARROW_UP_PATH, ARROW_DOWN_PATH = ensure_arrow_icons()
 
@@ -20,6 +21,7 @@ class FlightTableWidget(QWidget):
     open_debriefing_requested = pyqtSignal(str)
     export_all_requested = pyqtSignal()
     reset_analysis_requested = pyqtSignal()
+    inspect_wing_color_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -184,7 +186,7 @@ class FlightTableWidget(QWidget):
                     return count
         return max(1, count)
 
-    def add_flight_row(self, video_path: str, pilot: str, flight_num: int, glider: str, phrases: str, is_confirmed: bool, confidence: float = 1.0, recorded_at: str = ""):
+    def add_flight_row(self, video_path: str, pilot: str, flight_num: int, glider: str, phrases: str, is_confirmed: bool, confidence: float = 1.0, recorded_at: str = "", wing_colors: list = None):
         row = self.table_flights.rowCount()
         self.table_flights.blockSignals(True)
         self.table_flights.insertRow(row)
@@ -290,11 +292,10 @@ class FlightTableWidget(QWidget):
         combo_pilot.currentTextChanged.connect(lambda text, r=row, p=video_path: self._on_pilot_combo_changed(r, p, text))
         self.table_flights.setCellWidget(row, 3, combo_pilot)
 
-        # Colonna 4: Vela / Colore
-        item_glider = QTableWidgetItem(glider)
-        item_glider.setForeground(QBrush(QColor("#06b6d4")))
-        item_glider.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
-        self.table_flights.setItem(row, 4, item_glider)
+        # Colonna 4: Vela / Colore (Badge Cromatico + Testo)
+        badge_glider = GliderBadgeWidget(glider, wing_colors)
+        badge_glider.clicked.connect(lambda p=video_path: self.inspect_wing_color_requested.emit(p))
+        self.table_flights.setCellWidget(row, 4, badge_glider)
 
         # Colonna 5: Esito / Certezza
         if is_confirmed:
@@ -329,7 +330,10 @@ class FlightTableWidget(QWidget):
         self.table_flights.setItem(row, 6, item_phrases)
 
         # Colonna 7: Debriefing Button
-        btn_watch = QPushButton("▶ Guarda")
+        sc = SidecarData(video_path)
+        ch_count = len(sc.chapters) if sc.chapters else 0
+        btn_label = f"▶ Guarda ({ch_count})" if ch_count > 0 else "▶ Guarda"
+        btn_watch = QPushButton(btn_label)
         btn_watch.setStyleSheet("""
             QPushButton {
                 padding: 5px 14px;
@@ -346,6 +350,22 @@ class FlightTableWidget(QWidget):
         btn_watch.clicked.connect(lambda _, p=video_path: self.open_debriefing_requested.emit(p))
         self.table_flights.setCellWidget(row, 7, btn_watch)
         self.table_flights.blockSignals(False)
+
+    def update_maneuver_progress(self, video_path: str, status_text: str, percent: int):
+        for r in range(self.table_flights.rowCount()):
+            item = self.table_flights.item(r, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
+                btn = self.table_flights.cellWidget(r, 7)
+                if isinstance(btn, QPushButton):
+                    if percent < 100:
+                        btn.setText(f"⏳ {percent}%")
+                        btn.setToolTip(f"Rilevamento manovre in corso: {status_text}")
+                    else:
+                        sc = SidecarData(video_path)
+                        count = len(sc.chapters) if sc.chapters else 0
+                        btn.setText(f"▶ Guarda ({count})")
+                        btn.setToolTip(f"{count} manovre rilevate: {status_text}")
+                break
 
     def _set_certainty_badge(self, row: int, confidence: float):
         self.table_flights.removeCellWidget(row, 5)
@@ -405,9 +425,14 @@ class FlightTableWidget(QWidget):
                     spin_volo.blockSignals(False)
 
                 glider_val = self.pilot_gliders.get(match.detected_pilot.lower(), "")
-                g_item = QTableWidgetItem(glider_val)
-                g_item.setForeground(QBrush(QColor("#38bdf8")))
-                self.table_flights.setItem(r, 4, g_item)
+                w_badge = self.table_flights.cellWidget(r, 4)
+                w_colors = getattr(match, "wing_colors", []) or []
+                if isinstance(w_badge, GliderBadgeWidget):
+                    w_badge.set_data(glider_val, w_colors)
+                else:
+                    new_badge = GliderBadgeWidget(glider_val, w_colors)
+                    new_badge.clicked.connect(lambda p=match.video_path: self.inspect_wing_color_requested.emit(p))
+                    self.table_flights.setCellWidget(r, 4, new_badge)
 
                 conf = getattr(match, "confidence", 1.0) or 1.0
                 self._set_certainty_badge(r, conf)
@@ -446,11 +471,13 @@ class FlightTableWidget(QWidget):
         glider_val = self.pilot_gliders.get(pilot_name.lower(), "")
         if glider_val:
             sc.glider = glider_val
-            g_item = self.table_flights.item(row, 4)
-            if g_item:
-                g_item.setText(glider_val)
+            w_badge = self.table_flights.cellWidget(row, 4)
+            if isinstance(w_badge, GliderBadgeWidget):
+                w_badge.set_data(glider_val, sc.wing_colors)
             else:
-                self.table_flights.setItem(row, 4, QTableWidgetItem(glider_val))
+                new_b = GliderBadgeWidget(glider_val, sc.wing_colors)
+                new_b.clicked.connect(lambda p=video_path: self.inspect_wing_color_requested.emit(p))
+                self.table_flights.setCellWidget(row, 4, new_b)
 
         spin_volo = self.table_flights.cellWidget(row, 2)
         if isinstance(spin_volo, QSpinBox):

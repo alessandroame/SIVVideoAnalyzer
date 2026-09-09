@@ -1,3 +1,4 @@
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFileDialog, QFrame,
@@ -64,6 +65,13 @@ class WelcomeCardWidget(QWidget):
         f_row.addWidget(self.txt_folder, stretch=1)
         f_row.addWidget(btn_browse)
         c_layout.addLayout(f_row)
+        self.txt_folder.textChanged.connect(self._on_source_path_changed)
+
+        # Badge informativo scansione cartella
+        self.lbl_scan_status = QLabel("")
+        self.lbl_scan_status.setStyleSheet("font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;")
+        self.lbl_scan_status.setVisible(False)
+        c_layout.addWidget(self.lbl_scan_status)
 
         # 2. Output
         lbl_output = QLabel("CARTELLA OUTPUT VIDEO ESPORTATI (PER I PILOTI)")
@@ -97,9 +105,33 @@ class WelcomeCardWidget(QWidget):
         c_layout.addLayout(out_row)
 
         # 3. Piloti
+        p_row = QHBoxLayout()
         lbl_pilots = QLabel("PILOTI E VELE DEL CORSO")
-        lbl_pilots.setStyleSheet("font-size: 11px; font-weight: 700; color: #cbd5e1; letter-spacing: 0.5px; margin-top: 4px;")
-        c_layout.addWidget(lbl_pilots)
+        lbl_pilots.setStyleSheet("font-size: 11px; font-weight: 700; color: #cbd5e1; letter-spacing: 0.5px;")
+        p_row.addWidget(lbl_pilots)
+
+        self.btn_import_pilots = QPushButton("📥 Importa dai Sidecar")
+        self.btn_import_pilots.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #38bdf8;
+                border: 1px solid #38bdf8;
+                border-radius: 6px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+                color: #ffffff;
+            }
+        """)
+        self.btn_import_pilots.setToolTip("Rilevati piloti già registrati nei file video. Clicca per importarli automaticamente.")
+        self.btn_import_pilots.setVisible(False)
+        self.btn_import_pilots.clicked.connect(self._import_discovered_pilots)
+        p_row.addWidget(self.btn_import_pilots)
+        p_row.addStretch()
+        c_layout.addLayout(p_row)
 
         hint = QLabel("Formato: <i>Nome - Colore Vela</i> (es: <code>Mario Rossi - Rosso/Nero</code>)")
         hint.setStyleSheet("color: #64748b; font-size: 11px;")
@@ -167,8 +199,8 @@ class WelcomeCardWidget(QWidget):
         c_layout.addSpacing(6)
 
         # 5. Pulsante Avvio
-        btn_launch = QPushButton("🚀  APRI REGISTRO VOLI")
-        btn_launch.setStyleSheet("""
+        self.btn_launch = QPushButton("🚀  APRI REGISTRO VOLI")
+        self.btn_launch.setStyleSheet("""
             QPushButton {
                 background-color: #059669;
                 color: #ffffff;
@@ -186,10 +218,79 @@ class WelcomeCardWidget(QWidget):
                 background-color: #047857;
             }
         """)
-        btn_launch.clicked.connect(self._on_launch_clicked)
-        c_layout.addWidget(btn_launch)
+        self.btn_launch.clicked.connect(self._on_launch_clicked)
+        c_layout.addWidget(self.btn_launch)
 
         layout.addWidget(card)
+
+    def _on_source_path_changed(self, text: str):
+        path = text.strip()
+        from core.session_scanner import scan_session_folder
+        if not path or not os.path.exists(path):
+            self.lbl_scan_status.setVisible(False)
+            self.btn_import_pilots.setVisible(False)
+            self.btn_launch.setText("🚀  APRI REGISTRO VOLI")
+            return
+
+        scan = scan_session_folder(path)
+        if scan.total_videos == 0:
+            self.lbl_scan_status.setText("⚠️ Nessun file video (.mp4, .mov, .mkv) trovato nella cartella.")
+            self.lbl_scan_status.setStyleSheet("background-color: #3f1a24; color: #fda4af; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;")
+            self.lbl_scan_status.setVisible(True)
+            self.btn_import_pilots.setVisible(False)
+            self.btn_launch.setText("🚀  APRI REGISTRO VOLI")
+        elif scan.is_fully_analyzed:
+            self.lbl_scan_status.setText(f"🟢 Tutti i {scan.total_videos} video sono già analizzati e pronti per il Debriefing!")
+            self.lbl_scan_status.setStyleSheet("background-color: #064e3b; color: #a7f3d0; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px;")
+            self.lbl_scan_status.setVisible(True)
+            self.btn_launch.setText(f"🎬  APRI DEBRIEFING ({scan.total_videos} VOLI PRONTI)")
+        elif scan.has_any_analyzed:
+            num_ready = len(scan.analyzed_videos)
+            num_pending = len(scan.pending_videos)
+            self.lbl_scan_status.setText(f"🟡 {scan.total_videos} video trovati: {num_ready} già analizzati, {num_pending} da analizzare.")
+            self.lbl_scan_status.setStyleSheet("background-color: #451a03; color: #fde047; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;")
+            self.lbl_scan_status.setVisible(True)
+            self.btn_launch.setText(f"⚡  APRI E ANALIZZA {num_pending} MANCANTI")
+        else:
+            self.lbl_scan_status.setText(f"ℹ️ {scan.total_videos} video da analizzare.")
+            self.lbl_scan_status.setStyleSheet("background-color: #172554; color: #93c5fd; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;")
+            self.lbl_scan_status.setVisible(True)
+            self.btn_launch.setText("🚀  APRI REGISTRO VOLI")
+
+        # Mostra opzione per importare i piloti se ce ne sono nei sidecar
+        if scan.discovered_pilots:
+            self._current_discovered_pilots = scan.discovered_pilots
+            existing_text = self.txt_pilots.toPlainText().strip().lower()
+            new_pilots_found = any(p.lower() not in existing_text for p in scan.discovered_pilots.keys())
+            self.btn_import_pilots.setVisible(new_pilots_found)
+        else:
+            self.btn_import_pilots.setVisible(False)
+
+    def _import_discovered_pilots(self):
+        if not hasattr(self, "_current_discovered_pilots") or not self._current_discovered_pilots:
+            return
+        lines = [line.strip() for line in self.txt_pilots.toPlainText().splitlines() if line.strip()]
+        existing_names = set()
+        for l in lines:
+            if "-" in l:
+                existing_names.add(l.split("-", 1)[0].strip().lower())
+            elif "," in l:
+                existing_names.add(l.split(",", 1)[0].strip().lower())
+            else:
+                existing_names.add(l.strip().lower())
+
+        added = []
+        for p, g in self._current_discovered_pilots.items():
+            if p.lower() not in existing_names:
+                if g:
+                    added.append(f"{p} - {g}")
+                else:
+                    added.append(p)
+
+        if added:
+            all_lines = lines + added
+            self.txt_pilots.setPlainText("\n".join(all_lines))
+        self.btn_import_pilots.setVisible(False)
 
     def _browse_source(self):
         d = QFileDialog.getExistingDirectory(self, "Seleziona cartella video SIV (Sorgente)", self.txt_folder.text().strip() or "")
@@ -231,6 +332,7 @@ class WelcomeCardWidget(QWidget):
     def load_values(self, source: str, output: str, pilots_raw: str, model: str):
         if source:
             self.txt_folder.setText(source)
+            self._on_source_path_changed(source)
         if output:
             self.txt_output.setText(output)
         if pilots_raw:

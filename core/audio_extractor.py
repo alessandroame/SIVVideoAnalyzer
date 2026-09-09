@@ -7,13 +7,14 @@ def get_ffmpeg_binary() -> str:
     """Restituisce il percorso dell'eseguibile ffmpeg incorporato."""
     return imageio_ffmpeg.get_ffmpeg_exe()
 
-def extract_audio(video_path: str, output_wav_path: str, sample_rate: int = 16000) -> str:
+def extract_audio(video_path: str, output_wav_path: str, sample_rate: int = 16000, duration: float = 0.0) -> str:
     """
     Estrae l'audio da un video in formato WAV mono 16kHz ottimizzato per Whisper.
     Applica filtri per:
     1. Tagliare le basse frequenze del vento (< 200 Hz)
     2. Tagliare i fischi e disturbi ad alta frequenza (> 3500 Hz)
     3. Normalizzare il volume della radio (loudnorm)
+    Se duration > 0, estrae solo i primi N secondi (estrazione veloce per rilevamento pilota).
     """
     ffmpeg_exe = get_ffmpeg_binary()
     os.makedirs(os.path.dirname(output_wav_path), exist_ok=True)
@@ -24,6 +25,11 @@ def extract_audio(video_path: str, output_wav_path: str, sample_rate: int = 1600
     cmd = [
         ffmpeg_exe,
         "-y",
+    ]
+    if duration > 0:
+        cmd.extend(["-t", str(duration)])
+
+    cmd.extend([
         "-i", str(video_path),
         "-vn",
         "-af", audio_filter,
@@ -31,7 +37,7 @@ def extract_audio(video_path: str, output_wav_path: str, sample_rate: int = 1600
         "-ar", str(sample_rate),
         "-ac", "1",
         str(output_wav_path)
-    ]
+    ])
     
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode != 0:
