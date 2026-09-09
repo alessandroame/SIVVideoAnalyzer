@@ -80,3 +80,14 @@ class TestCore(unittest.TestCase):
         match = detector.match_pilot_from_segments("GX010042.MP4", segments)
         self.assertEqual(match.detected_pilot, "Marco Rossi")
         self.assertGreaterEqual(match.confidence, 0.5)
+
+    def test_pilot_detector_quick_probe(self):
+        detector = PilotDetector(pilots_list=["Alessandro", "Federico"])
+        # Verifica che accetti i nuovi parametri quick_probe e max_probe_seconds
+        import inspect
+        sig = inspect.signature(detector.identify_pilot_from_audio)
+        self.assertIn("quick_probe", sig.parameters)
+        self.assertIn("max_probe_seconds", sig.parameters)
+        self.assertEqual(sig.parameters["quick_probe"].default, False)
+        self.assertEqual(sig.parameters["max_probe_seconds"].default, 90.0)
+

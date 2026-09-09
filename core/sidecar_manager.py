@@ -135,6 +135,27 @@ class SidecarData:
             self.data["metadata"] = {}
         self.data["metadata"]["wing_colors"] = colors
 
+    @property
+    def audio_confidence(self) -> float:
+        return float(self.data.get("metadata", {}).get("audio_confidence", 0.0))
+
+    @audio_confidence.setter
+    def audio_confidence(self, value: float):
+        if "metadata" not in self.data:
+            self.data["metadata"] = {}
+        self.data["metadata"]["audio_confidence"] = round(float(value), 2)
+
+    @property
+    def wing_confidence(self) -> float:
+        return float(self.data.get("metadata", {}).get("wing_confidence", 0.0))
+
+    @wing_confidence.setter
+    def wing_confidence(self, value: float):
+        if "metadata" not in self.data:
+            self.data["metadata"] = {}
+        self.data["metadata"]["wing_confidence"] = round(float(value), 2)
+
+
     def add_chapter(self, title: str, start: float, end: float, notes: str = "", command: str = ""):
         self.data["chapters"].append({
             "title": title,

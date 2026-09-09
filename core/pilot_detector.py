@@ -18,12 +18,15 @@ class VideoPilotMatch:
     flight_number: Optional[int] = None
     segments: List[TranscriptionSegment] = None
     wing_colors: List[Dict[str, str]] = None
+    audio_confidence: float = 0.0
+    wing_confidence: float = 0.0
 
     def __post_init__(self):
         if self.segments is None:
             self.segments = []
         if self.wing_colors is None:
             self.wing_colors = []
+
 
 class PilotDetector:
     def __init__(self, pilots_list: Optional[List[str]] = None, transcriber: Optional[SIVTranscriber] = None):
@@ -36,16 +39,17 @@ class PilotDetector:
     def set_pilots_list(self, pilots: List[str]):
         self.pilots_list = [p.strip() for p in pilots if p.strip()]
 
-    def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp", progress_callback=None, is_cancelled_callback=None) -> VideoPilotMatch:
+    def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp", progress_callback=None, is_cancelled_callback=None, quick_probe: bool = False, max_probe_seconds: float = 90.0) -> VideoPilotMatch:
         """
-        Estrae l'audio, calcola la durata, trascrive una sola volta (salvando in cache) e identifica il pilota.
+        Estrae l'audio, calcola la durata, trascrive e identifica il pilota.
+        Se quick_probe=True: estrae ed elabora solo i primi max_probe_seconds (ideale per la Fase 1 ultra-rapida).
         """
         os.makedirs(temp_dir, exist_ok=True)
         fname = os.path.basename(video_path)
         base_name = os.path.splitext(fname)[0]
         cache_file = os.path.join(temp_dir, f"{base_name}_cache.json")
         
-        # 1. Controlla se la trascrizione è già in cache su disco
+        # 1. Controlla se la trascrizione è già in cache completa su disco
         cached = VideoTranscriptionCache.load(cache_file)
         if cached:
             duration = cached.duration
@@ -53,9 +57,12 @@ class PilotDetector:
             if progress_callback:
                 progress_callback(duration, duration)
         else:
-            duration = get_video_duration(video_path)
-            wav_path = os.path.join(temp_dir, f"{base_name}_audio.wav")
-            extract_audio(video_path, wav_path)
+            total_duration = get_video_duration(video_path)
+            probe_duration = min(total_duration, max_probe_seconds) if (quick_probe and total_duration > 0) else (max_probe_seconds if quick_probe else 0.0)
+            duration = probe_duration if (quick_probe and probe_duration > 0) else total_duration
+
+            wav_path = os.path.join(temp_dir, f"{base_name}_{'probe' if quick_probe else 'audio'}.wav")
+            extract_audio(video_path, wav_path, duration=probe_duration if quick_probe else 0.0)
             
             def on_segment(seg):
                 if progress_callback and duration > 0:
@@ -68,12 +75,12 @@ class PilotDetector:
                 is_cancelled_callback=is_cancelled_callback
             )
             
-            # Salva in cache solo se non è stato interrotto
-            if not (is_cancelled_callback and is_cancelled_callback()):
+            # Salva in cache solo se è trascrizione COMPLETA e non è stato interrotto
+            if not quick_probe and not (is_cancelled_callback and is_cancelled_callback()):
                 new_cache = VideoTranscriptionCache(
                     video_path=video_path,
                     filename=fname,
-                    duration=duration,
+                    duration=total_duration,
                     segments=segments
                 )
                 new_cache.save(cache_file)

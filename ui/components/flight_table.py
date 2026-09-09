@@ -64,12 +64,25 @@ class FlightTableWidget(QWidget):
 
         top.addStretch()
 
+        # Indicatori di stato a 3 Fasi distinti
+        self.lbl_badge_audio = QLabel("🎙️ Audio: 0/0")
+        self.lbl_badge_audio.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+        top.addWidget(self.lbl_badge_audio)
+
+        self.lbl_badge_wing = QLabel("🪂 Vela: 0/0")
+        self.lbl_badge_wing.setStyleSheet("background-color: #1e293b; color: #eab308; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+        top.addWidget(self.lbl_badge_wing)
+
+        self.lbl_badge_man = QLabel("🎯 Manovre: 0/0")
+        self.lbl_badge_man.setStyleSheet("background-color: #1e293b; color: #a855f7; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+        top.addWidget(self.lbl_badge_man)
+
         self.lbl_worker_status = QLabel("")
-        self.lbl_worker_status.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 13px;")
+        self.lbl_worker_status.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 12px; margin-left: 6px;")
         top.addWidget(self.lbl_worker_status)
 
         self.progress_overall = QProgressBar()
-        self.progress_overall.setFixedWidth(180)
+        self.progress_overall.setFixedWidth(140)
         self.progress_overall.setFixedHeight(14)
         self.progress_overall.setStyleSheet("""
             QProgressBar {
@@ -129,28 +142,37 @@ class FlightTableWidget(QWidget):
         top.addWidget(btn_reset)
         layout.addLayout(top)
 
-        # Tabella Voli (8 Colonne)
+        # Tabella Voli (8 Colonne Distinte per Fase)
+        # 0: File Video (Stretch per adattarsi al restringimento)
+        # 1: Data e Ora
+        # 2: Volo N°
+        # 3: Pilota Assegnato
+        # 4: 🎙️ Analisi Pilota (compatta: radio check/chiamata)
+        # 5: 🪂 Analisi Vela (badge compatto colori)
+        # 6: 🎯 Manovre SIV (badge compatto)
+        # 7: Debriefing (pulsante player)
         self.table_flights = QTableWidget(0, 8)
         self.table_flights.setHorizontalHeaderLabels([
-            "File Video", "Data e Ora", "Volo N°", "Pilota Assegnato", "Vela / Colore", "Esito / Certezza", "Chiamata Radio Riconosciuta", "Debriefing"
+            "File Video", "Data e Ora", "Volo N°", "Pilota Assegnato", "🎙️ Analisi Pilota", "🪂 Analisi Vela", "🎯 Manovre SIV", "Debriefing"
         ])
-        self.table_flights.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_flights.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table_flights.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_flights.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self.table_flights.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.verticalHeader().setDefaultSectionSize(42)
         self.table_flights.verticalHeader().setVisible(False)
         self.table_flights.setShowGrid(False)
 
+
         self.table_flights.cellChanged.connect(self._on_table_cell_edited)
         self.table_flights.cellDoubleClicked.connect(self._on_row_double_clicked)
         layout.addWidget(self.table_flights)
 
-        hint = QLabel("💡 <b>Suggerimento:</b> Doppio clic su una riga per aprire il Debriefing. Puoi selezionare il Pilota dal menù o cambiare il N° di volo con le frecce.")
+        hint = QLabel("💡 <b>Suggerimento:</b> Doppio clic su una riga per aprire il Debriefing. Puoi selezionare il Pilota dal menù o cliccare sui colori della vela per aprire la diagnostica.")
         hint.setStyleSheet("color: #64748b; font-size: 12px; margin-top: 2px;")
         layout.addWidget(hint)
 
@@ -159,6 +181,21 @@ class FlightTableWidget(QWidget):
         self.known_pilots = list(pilots)
         self.pilot_gliders = dict(gliders)
         self.table_flights.setRowCount(0)
+
+    def update_phases_status(self, audio_done: int, wing_done: int, man_done: int, total_clips: int):
+        tot = max(1, total_clips)
+        a_col = "#10b981" if audio_done >= tot else "#38bdf8"
+        w_col = "#10b981" if wing_done >= tot else "#eab308"
+        m_col = "#10b981" if man_done >= tot else "#a855f7"
+
+        self.lbl_badge_audio.setText(f"🎙️ Audio: {audio_done}/{tot}")
+        self.lbl_badge_audio.setStyleSheet(f"background-color: #1e293b; color: {a_col}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+
+        self.lbl_badge_wing.setText(f"🪂 Vela: {wing_done}/{tot}")
+        self.lbl_badge_wing.setStyleSheet(f"background-color: #1e293b; color: {w_col}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+
+        self.lbl_badge_man.setText(f"🎯 Manovre: {man_done}/{tot}")
+        self.lbl_badge_man.setStyleSheet(f"background-color: #1e293b; color: {m_col}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
 
     def set_worker_status(self, text: str):
         self.lbl_worker_status.setText(text)
@@ -292,19 +329,14 @@ class FlightTableWidget(QWidget):
         combo_pilot.currentTextChanged.connect(lambda text, r=row, p=video_path: self._on_pilot_combo_changed(r, p, text))
         self.table_flights.setCellWidget(row, 3, combo_pilot)
 
-        # Colonna 4: Vela / Colore (Badge Cromatico + Testo)
-        badge_glider = GliderBadgeWidget(glider, wing_colors)
-        badge_glider.clicked.connect(lambda p=video_path: self.inspect_wing_color_requested.emit(p))
-        self.table_flights.setCellWidget(row, 4, badge_glider)
-
-        # Colonna 5: Esito / Certezza
+        # Colonna 4: 🎙️ Analisi Pilota (Radio Check / Chiamata)
         if is_confirmed:
-            self._set_certainty_badge(row, confidence)
+            self._set_audio_badge(row, confidence, phrases)
         else:
             prog_bar = QProgressBar()
             prog_bar.setRange(0, 100)
             prog_bar.setValue(0)
-            prog_bar.setFixedWidth(130)
+            prog_bar.setFixedWidth(100)
             prog_bar.setFixedHeight(16)
             prog_bar.setStyleSheet("""
                 QProgressBar {
@@ -321,17 +353,29 @@ class FlightTableWidget(QWidget):
                     border-radius: 7px;
                 }
             """)
-            self.table_flights.setCellWidget(row, 5, prog_bar)
+            self.table_flights.setCellWidget(row, 4, prog_bar)
 
-        # Colonna 6: Chiamata Radio
-        item_phrases = QTableWidgetItem(phrases)
-        item_phrases.setFlags(item_phrases.flags() ^ Qt.ItemFlag.ItemIsEditable)
-        item_phrases.setForeground(QBrush(QColor("#cbd5e1")))
-        self.table_flights.setItem(row, 6, item_phrases)
 
-        # Colonna 7: Debriefing Button
+        # Colonna 5: 🪂 Analisi Vela (Badge Cromatico)
+        badge_glider = GliderBadgeWidget(glider, wing_colors)
+        badge_glider.clicked.connect(lambda p=video_path: self.inspect_wing_color_requested.emit(p))
+        self.table_flights.setCellWidget(row, 5, badge_glider)
+
+        # Colonna 6: 🎯 Manovre SIV
         sc = SidecarData(video_path)
         ch_count = len(sc.chapters) if sc.chapters else 0
+        if ch_count > 0:
+            item_man = QTableWidgetItem(f"🟢 {ch_count} manovre")
+            item_man.setForeground(QBrush(QColor("#10b981")))
+        else:
+            item_man = QTableWidgetItem("⚪ In attesa..." if not is_confirmed else "⚪ Nessuna")
+            item_man.setForeground(QBrush(QColor("#94a3b8")))
+        item_man.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item_man.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        item_man.setFlags(item_man.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        self.table_flights.setItem(row, 6, item_man)
+
+        # Colonna 7: Debriefing Button
         btn_label = f"▶ Guarda ({ch_count})" if ch_count > 0 else "▶ Guarda"
         btn_watch = QPushButton(btn_label)
         btn_watch.setStyleSheet("""
@@ -351,50 +395,89 @@ class FlightTableWidget(QWidget):
         self.table_flights.setCellWidget(row, 7, btn_watch)
         self.table_flights.blockSignals(False)
 
-    def update_maneuver_progress(self, video_path: str, status_text: str, percent: int):
-        for r in range(self.table_flights.rowCount()):
-            item = self.table_flights.item(r, 0)
-            if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
-                btn = self.table_flights.cellWidget(r, 7)
-                if isinstance(btn, QPushButton):
-                    if percent < 100:
-                        btn.setText(f"⏳ {percent}%")
-                        btn.setToolTip(f"Rilevamento manovre in corso: {status_text}")
-                    else:
-                        sc = SidecarData(video_path)
-                        count = len(sc.chapters) if sc.chapters else 0
-                        btn.setText(f"▶ Guarda ({count})")
-                        btn.setToolTip(f"{count} manovre rilevate: {status_text}")
-                break
-
-    def _set_certainty_badge(self, row: int, confidence: float):
-        self.table_flights.removeCellWidget(row, 5)
+    def _set_audio_badge(self, row: int, confidence: float, radio_phrase: str = ""):
+        self.table_flights.removeCellWidget(row, 4)
         pct = int(confidence * 100) if confidence <= 1.0 else int(confidence)
-        if pct >= 85:
-            text = f"🟢 {pct}% Certo"
+        if pct >= 75:
+            text = f"🟢 Radio: {pct}%"
             color = "#10b981"
-        elif pct >= 65:
-            text = f"🟡 {pct}% Probabile"
+        elif pct >= 45:
+            text = f"🟡 Radio: {pct}%"
+            color = "#f59e0b"
+        elif radio_phrase:
+            text = "🟡 Radio debole"
             color = "#f59e0b"
         else:
-            text = f"🔴 {pct}% Incerto"
-            color = "#f43f5e"
+            text = "⚪ Nessuna radio"
+            color = "#94a3b8"
 
         item = QTableWidgetItem(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setForeground(QBrush(QColor(color)))
         item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-        self.table_flights.setItem(row, 5, item)
+        if radio_phrase:
+            item.setToolTip(f"Frase radio rilevata:\n{radio_phrase}")
+        self.table_flights.setItem(row, 4, item)
+
+    def update_audio_result(self, video_path: str, confidence: float, radio_phrase: str, detected_pilot: str):
+        for r in range(self.table_flights.rowCount()):
+            item = self.table_flights.item(r, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
+                self._set_audio_badge(r, confidence, radio_phrase)
+                break
+
+    def update_wing_result(self, video_path: str, wing_colors: list, confidence: float, detected_pilot: str):
+        for r in range(self.table_flights.rowCount()):
+            item = self.table_flights.item(r, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
+                w_badge = self.table_flights.cellWidget(r, 5)
+                glider_val = self.pilot_gliders.get(detected_pilot.lower(), "") if detected_pilot else ""
+                if isinstance(w_badge, GliderBadgeWidget):
+                    w_badge.set_data(glider_val, wing_colors)
+                else:
+                    new_badge = GliderBadgeWidget(glider_val, wing_colors)
+                    new_badge.clicked.connect(lambda p=video_path: self.inspect_wing_color_requested.emit(p))
+                    self.table_flights.setCellWidget(r, 5, new_badge)
+                break
 
     def update_clip_progress(self, video_path: str, curr_sec: float, total_sec: float):
         pct = int(min(100.0, (curr_sec / max(0.1, total_sec)) * 100.0)) if total_sec > 0 else 50
         for r in range(self.table_flights.rowCount()):
             item = self.table_flights.item(r, 0)
             if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
-                bar = self.table_flights.cellWidget(r, 5)
+                bar = self.table_flights.cellWidget(r, 4)
                 if isinstance(bar, QProgressBar):
                     bar.setValue(pct)
+                break
+
+    def update_maneuver_progress(self, video_path: str, status_text: str, percent: int):
+        for r in range(self.table_flights.rowCount()):
+            item = self.table_flights.item(r, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
+                # Aggiorna Colonna 6: Manovre SIV
+                sc = SidecarData(video_path)
+                count = len(sc.chapters) if sc.chapters else 0
+                if percent < 100:
+                    it_man = QTableWidgetItem(f"⏳ {percent}%")
+                    it_man.setForeground(QBrush(QColor("#a855f7")))
+                    it_man.setToolTip(f"Rilevamento in corso: {status_text}")
+                elif count > 0:
+                    it_man = QTableWidgetItem(f"🟢 {count} manovre")
+                    it_man.setForeground(QBrush(QColor("#10b981")))
+                    it_man.setToolTip(f"{count} manovre rilevate")
+                else:
+                    it_man = QTableWidgetItem("⚪ Nessuna")
+                    it_man.setForeground(QBrush(QColor("#94a3b8")))
+                it_man.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                it_man.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                it_man.setFlags(it_man.flags() ^ Qt.ItemFlag.ItemIsEditable)
+                self.table_flights.setItem(r, 6, it_man)
+
+                # Aggiorna Colonna 7: Tasto Debriefing
+                btn = self.table_flights.cellWidget(r, 7)
+                if isinstance(btn, QPushButton):
+                    btn.setText(f"▶ Guarda ({count})" if count > 0 else "▶ Guarda")
                 break
 
     def on_clip_analyzed(self, match: VideoPilotMatch):
@@ -425,30 +508,29 @@ class FlightTableWidget(QWidget):
                     spin_volo.blockSignals(False)
 
                 glider_val = self.pilot_gliders.get(match.detected_pilot.lower(), "")
-                w_badge = self.table_flights.cellWidget(r, 4)
+                w_badge = self.table_flights.cellWidget(r, 5)
                 w_colors = getattr(match, "wing_colors", []) or []
                 if isinstance(w_badge, GliderBadgeWidget):
                     w_badge.set_data(glider_val, w_colors)
                 else:
                     new_badge = GliderBadgeWidget(glider_val, w_colors)
                     new_badge.clicked.connect(lambda p=match.video_path: self.inspect_wing_color_requested.emit(p))
-                    self.table_flights.setCellWidget(r, 4, new_badge)
+                    self.table_flights.setCellWidget(r, 5, new_badge)
 
-                conf = getattr(match, "confidence", 1.0) or 1.0
-                self._set_certainty_badge(r, conf)
-
-                phr = " | ".join(match.matched_phrases) if match.matched_phrases else "—"
-                self.table_flights.setItem(r, 6, QTableWidgetItem(phr))
+                phr = " | ".join(match.matched_phrases) if match.matched_phrases else ""
+                self._set_audio_badge(r, match.audio_confidence if match.audio_confidence > 0 else match.confidence, phr)
                 self.table_flights.blockSignals(False)
 
                 sc = SidecarData(match.video_path)
                 sc.pilot_name = match.detected_pilot
                 sc.flight_number = final_flight_num
-                sc.confidence = conf
+                sc.confidence = match.confidence
+                sc.audio_confidence = match.audio_confidence
+                sc.wing_confidence = match.wing_confidence
                 if glider_val:
                     sc.glider = glider_val
                 if match.matched_phrases:
-                    sc.radio_phrase = " | ".join(match.matched_phrases)
+                    sc.radio_phrase = phr
                 sc.save()
                 break
 
@@ -471,13 +553,13 @@ class FlightTableWidget(QWidget):
         glider_val = self.pilot_gliders.get(pilot_name.lower(), "")
         if glider_val:
             sc.glider = glider_val
-            w_badge = self.table_flights.cellWidget(row, 4)
+            w_badge = self.table_flights.cellWidget(row, 5)
             if isinstance(w_badge, GliderBadgeWidget):
                 w_badge.set_data(glider_val, sc.wing_colors)
             else:
                 new_b = GliderBadgeWidget(glider_val, sc.wing_colors)
                 new_b.clicked.connect(lambda p=video_path: self.inspect_wing_color_requested.emit(p))
-                self.table_flights.setCellWidget(row, 4, new_b)
+                self.table_flights.setCellWidget(row, 5, new_b)
 
         spin_volo = self.table_flights.cellWidget(row, 2)
         if isinstance(spin_volo, QSpinBox):
@@ -488,19 +570,20 @@ class FlightTableWidget(QWidget):
             sc.flight_number = auto_num
 
         sc.save()
-        self._set_certainty_badge(row, 1.0)
+        self._set_audio_badge(row, 1.0, "Assegnato manualmente dall'istruttore")
 
     def _on_table_cell_edited(self, row: int, col: int):
         v_path = self.table_flights.item(row, 0).data(Qt.ItemDataRole.UserRole)
         if not v_path or not os.path.exists(v_path):
             return
         sc = SidecarData(v_path)
-        if col == 4:
-            sc.glider = self.table_flights.item(row, 4).text().strip()
+        if col == 5:
+            sc.glider = self.table_flights.item(row, 5).text().strip()
             sc.save()
 
     def _on_row_double_clicked(self, row: int, col: int):
         v_path = self.table_flights.item(row, 0).data(Qt.ItemDataRole.UserRole)
+
         if v_path and os.path.exists(v_path):
             self.open_debriefing_requested.emit(v_path)
 

@@ -33,7 +33,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SIV Video Analyzer")
-        self.resize(1220, 760)
+        self.setMinimumSize(850, 550)
+        self.resize(1080, 680)
+
 
         # Configura stili Material 3
         up_path, down_path = ensure_arrow_icons()
@@ -165,6 +167,7 @@ class MainWindow(QMainWindow):
         if videos_to_process:
             self.transcriber.set_model_size(model_name)
             self.page_table.update_overall_progress("Avvio analisi...", 0)
+            self.page_table.update_phases_status(0, 0, 0, len(videos_to_process))
             self.worker = AnalysisWorker(
                 video_files=videos_to_process,
                 pilot_names=pilot_names,
@@ -174,6 +177,9 @@ class MainWindow(QMainWindow):
             )
             self.worker.clip_analyzed.connect(self.page_table.on_clip_analyzed)
             self.worker.clip_progress.connect(self.page_table.update_clip_progress)
+            self.worker.audio_analyzed.connect(self.page_table.update_audio_result)
+            self.worker.wing_analyzed.connect(self.page_table.update_wing_result)
+            self.worker.phases_status.connect(self.page_table.update_phases_status)
             self.worker.overall_progress.connect(self.page_table.update_overall_progress)
             self.worker.status_update.connect(self.page_table.set_worker_status)
             self.worker.maneuvers_ready.connect(self.page_player.update_chapters)
@@ -182,6 +188,7 @@ class MainWindow(QMainWindow):
             self.worker.start()
         else:
             self.page_table.hide_progress()
+            self.page_table.update_phases_status(len(self.video_files), len(self.video_files), len(self.video_files), len(self.video_files))
             self.page_table.set_worker_status("Tutti i video sono già stati analizzati.")
 
     def _reset_analysis_data(self):
