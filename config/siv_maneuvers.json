@@ -68,7 +68,7 @@
       "id": "uscita_spirale",
       "name": "Uscita da Spirale",
       "keywords": [
-        "esci dalla vite", "dissipa", "uscita progressiva", "lascia scorrere", "frena il beccheggio"
+        "esci dalla vite", "dissipa la vite", "uscita progressiva dalla vite", "uscita da spirale", "dissipa la spirale"
       ],
       "category": "Spirale"
     },
@@ -76,8 +76,8 @@
       "id": "wingover",
       "name": "Wingover / Rollio",
       "keywords": [
-        "wingover", "inversione di rollio", "rollio", "carica a destra", "inverto", "scambia il peso",
-        "wing over", "inversioni", "scambia e carica", "vai sinistra lascia destra"
+        "wingover", "inversione di rollio", "inversioni di rollio", "carica a destra", "scambia il peso",
+        "wing over", "scambia e carica", "vai sinistra lascia destra"
       ],
       "category": "Dinamica"
     },
@@ -85,7 +85,7 @@
       "id": "delfinaggio",
       "name": "Delfinaggio / Pitching",
       "keywords": [
-        "delfinaggio", "beccheggio", "lascia picchiare", "frena quando passa davanti", "controlla il tuffo"
+        "delfinaggio", "fai delfinaggio", "innesca il beccheggio", "lascia picchiare", "frena quando passa davanti", "controlla il tuffo"
       ],
       "category": "Dinamica"
     },

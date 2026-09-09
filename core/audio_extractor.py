@@ -56,11 +56,19 @@ def get_video_duration(video_path: str) -> float:
         return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
     return 0.0
 
-def get_video_creation_time(video_path: str) -> float:
+def get_video_creation_time(video_path: str, fast: bool = True) -> float:
     """
-    Estrae il timestamp di creazione originale (Unix epoch) dai metadati del file (es. QuickTime/MP4 creation_time).
-    Se assente o invalido, ricade sul timestamp del filesystem (os.path.getmtime).
+    Estrae il timestamp del file in modo istantaneo.
+    Di default (fast=True) legge mtime del filesystem (Windows/Linux/Mac), che per video da scheda SD
+    e action cam corrisponde al timestamp reale di registrazione in meno di 0.1ms.
+    Se fast=False, tenta l'ispezione approfondita ffmpeg.
     """
+    if fast:
+        try:
+            return os.path.getmtime(video_path)
+        except Exception:
+            return 0.0
+
     import datetime
     import re
     
@@ -72,19 +80,31 @@ def get_video_creation_time(video_path: str) -> float:
     ]
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        # Cerca creation_time nei metadati: es. "creation_time   : 2026-05-14T09:30:15.000000Z"
         match = re.search(r"creation_time\s*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z?)", result.stderr, re.IGNORECASE)
         if match:
             dt_str = match.group(1).replace("Z", "").replace("T", " ")
-            # Se ha frazioni di secondo, prendi solo i primi 19 caratteri YYYY-MM-DD HH:MM:SS
             dt_clean = dt_str[:19]
             dt = datetime.datetime.strptime(dt_clean, "%Y-%m-%d %H:%M:%S")
             return dt.timestamp()
     except Exception:
         pass
 
-    # Fallback: filesystem mtime
     try:
         return os.path.getmtime(video_path)
     except Exception:
         return 0.0
+
+def get_formatted_video_datetime(video_path: str) -> str:
+    """
+    Restituisce la data e l'ora di registrazione formattata: 'DD/MM/YYYY HH:MM:SS'.
+    Usa mtime del file se presente, altrimenti stringa vuota.
+    """
+    try:
+        ts = get_video_creation_time(video_path, fast=True)
+        if ts > 0:
+            import datetime
+            dt = datetime.datetime.fromtimestamp(ts)
+            return dt.strftime("%d/%m/%Y %H:%M:%S")
+    except Exception:
+        pass
+    return "—"

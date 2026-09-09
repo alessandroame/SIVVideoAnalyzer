@@ -314,19 +314,26 @@ class ChaptersView(QWidget):
 
     def add_manual_chapter(self):
         pos_sec = self.media_player.position() / 1000.0
-        from core.maneuver_detector import SIVChapter
-        ch = SIVChapter(
-            start_time=pos_sec,
-            end_time=pos_sec + 5.0,
-            maneuver_id="manuale",
-            maneuver_name="Nuova Manovra",
-            category="Manuale",
-            transcription_text="Aggiunta manualmente",
-            confidence=1.0
-        )
-        self.chapters.append(ch)
-        self.chapters.sort(key=lambda x: x.start_time)
-        self.set_chapters(self.chapters)
+        from core.maneuver_detector import SIVChapter, ManeuverDetector
+        from ui.add_chapter_dialog import AddChapterQuickDialog
+
+        detector = ManeuverDetector()
+        dlg = AddChapterQuickDialog(current_seconds=pos_sec, active_maneuvers=detector.active_maneuvers, parent=self)
+        if dlg.exec():
+            title = dlg.selected_title or "Nuova Manovra"
+            ch = SIVChapter(
+                start_time=pos_sec,
+                end_time=pos_sec + 15.0,
+                maneuver_id="manuale",
+                maneuver_name=title,
+                category=dlg.selected_category or "Manuale",
+                transcription_text="Aggiunta manualmente",
+                confidence=1.0
+            )
+            self.chapters.append(ch)
+            self.chapters.sort(key=lambda x: x.start_time)
+            self.set_chapters(self.chapters)
+            self.sync_to_sidecar()
 
     def remove_selected_chapter(self):
         selected_rows = sorted(set(index.row() for index in self.table_chapters.selectedIndexes()), reverse=True)

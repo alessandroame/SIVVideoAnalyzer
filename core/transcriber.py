@@ -8,10 +8,10 @@ class TranscriptionSegment:
     text: str
 
 class SIVTranscriber:
-    def __init__(self, model_size: str = "base", device: str = "auto", compute_type: str = "default"):
+    def __init__(self, model_size: str = "small", device: str = "auto", compute_type: str = "default"):
         """
         Inizializza il motore faster-whisper.
-        model_size: 'base', 'small', 'medium'
+        model_size: 'small', 'medium'
         device: 'cuda', 'cpu', 'auto'
         """
         self.model_size = model_size
@@ -64,7 +64,9 @@ class SIVTranscriber:
             "orecchie, grandi orecchie, speed bar, acceleratore, spirale picchiata, vite, "
             "uscita progressiva, wingover, inversione di rollio, delfinaggio, beccheggio, "
             "b-stall, stallo di b, full stall, stallo pieno, backfly, retrocessione, spin, "
-            "negativa, autorotazione, radio check, sei in box, pronto per l'esercizio, vai, via, lascia."
+            "negativa, autorotazione, radio check, sei in box, pronto per l'esercizio, vai, via, lascia, "
+            "fanne un'altra, facciamone un'altra, riproviamo, riprova, ancora una, rifalla, un'altra uguale, "
+            "stessa cosa, altra volta, 3 2 1 via tira deciso."
         )
 
         # Attiva VAD Filter per saltare istantaneamente silenzi e rumori di fondo senza parlato

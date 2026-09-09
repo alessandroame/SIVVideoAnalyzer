@@ -3,7 +3,7 @@ import os
 import time
 from datetime import datetime
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFileDialog, QStackedWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QSlider,
     QFrame, QMessageBox, QSplitter, QProgressBar, QComboBox, QSpinBox
@@ -14,17 +14,20 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from core.sidecar_manager import SidecarData
-from core.audio_extractor import get_video_creation_time
+from core.audio_extractor import get_video_creation_time, get_formatted_video_datetime
 from core.pilot_detector import PilotDetector, VideoPilotMatch, VideoTranscriptionCache
 from core.transcriber import SIVTranscriber
 from core.maneuver_detector import ManeuverDetector
 from core.flight_grouper import VideoExporter
+from ui.maneuvers_dialog import ManeuversConfigDialog
+from ui.add_chapter_dialog import AddChapterQuickDialog
 
 def ensure_arrow_icons() -> tuple[str, str]:
     """Genera le icone SVG ciano su disco se non esistono e restituisce i percorsi formattati per QSS."""
-    os.makedirs("assets", exist_ok=True)
-    up_path = os.path.abspath("assets/arrow_up.svg").replace("\\", "/")
-    down_path = os.path.abspath("assets/arrow_down.svg").replace("\\", "/")
+    icons_dir = os.path.join(os.path.dirname(__file__), "icons")
+    os.makedirs(icons_dir, exist_ok=True)
+    up_path = os.path.abspath(os.path.join(icons_dir, "arrow_up.svg")).replace("\\", "/")
+    down_path = os.path.abspath(os.path.join(icons_dir, "arrow_down.svg")).replace("\\", "/")
     
     if not os.path.exists(up_path):
         with open(up_path, "w", encoding="utf-8") as f:
@@ -39,6 +42,45 @@ def ensure_arrow_icons() -> tuple[str, str]:
 ARROW_UP_PATH, ARROW_DOWN_PATH = ensure_arrow_icons()
 
 # ------------------------------------------------------------------
+# WIDGET VIDEO PERSONALIZZATO (GESTIONE ESC, FULLSCREEN & KEYBOARD)
+# ------------------------------------------------------------------
+class SIVVideoWidget(QVideoWidget):
+    """QVideoWidget con gestione integrata della tastiera in modalità a tutto schermo.
+    Risolve il blocco del tasto ESC e F quando il widget viene staccato da MainWindow."""
+    escape_pressed = pyqtSignal()
+    toggle_fullscreen_requested = pyqtSignal()
+    toggle_play_requested = pyqtSignal()
+    seek_requested = pyqtSignal(int)  # ms
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            if self.isFullScreen():
+                self.setFullScreen(False)
+            self.escape_pressed.emit()
+            event.accept()
+        elif key == Qt.Key.Key_F:
+            self.setFullScreen(not self.isFullScreen())
+            self.toggle_fullscreen_requested.emit()
+            event.accept()
+        elif key == Qt.Key.Key_Space:
+            self.toggle_play_requested.emit()
+            event.accept()
+        elif key == Qt.Key.Key_Left:
+            self.seek_requested.emit(-5000)
+            event.accept()
+        elif key == Qt.Key.Key_Right:
+            self.seek_requested.emit(5000)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        self.setFullScreen(not self.isFullScreen())
+        self.toggle_fullscreen_requested.emit()
+        event.accept()
+
+# ------------------------------------------------------------------
 # WORKER BACKGROUND: PRIORITÀ ASSOLUTA MANOVRE & ZERO ATTESE
 # ------------------------------------------------------------------
 class AnalysisWorker(QThread):
@@ -48,12 +90,13 @@ class AnalysisWorker(QThread):
     status_update = pyqtSignal(str)
     maneuvers_ready = pyqtSignal(str, list)         # video_path, list of chapters
 
-    def __init__(self, video_files, pilot_names, transcriber, priority_video=None):
+    def __init__(self, video_files, pilot_names, transcriber, priority_video=None, maneuver_detector=None):
         super().__init__()
         self.video_files = list(video_files)
         self.pilot_names = pilot_names
         self.transcriber = transcriber
         self.priority_video = priority_video
+        self.maneuver_detector = maneuver_detector or ManeuverDetector()
         self._is_cancelled = False
         self._requested_priority = None
 
@@ -102,7 +145,7 @@ class AnalysisWorker(QThread):
 
     def run(self):
         detector = PilotDetector(pilots_list=self.pilot_names, transcriber=self.transcriber)
-        man_detector = ManeuverDetector()
+        man_detector = self.maneuver_detector
 
         # 🥇 PRIORITÀ 1: Se c'è un video prioritario specificato all'avvio, fai subito le manovre
         if self.priority_video:
@@ -193,14 +236,19 @@ class AnalysisWorker(QThread):
             avg_per_clip = elapsed / max(1, clips_done)
             remaining_clips = total_clips - clips_done
             est_remaining_sec = int(avg_per_clip * remaining_clips)
+            est_total_sec = int(avg_per_clip * total_clips)
 
             pct = int((clips_done / total_clips) * 100)
             if remaining_clips > 0:
                 m_rem = est_remaining_sec // 60
                 s_rem = est_remaining_sec % 60
-                eta_str = f"⏱ Tempo stimato alla fine: {m_rem:02d}m {s_rem:02d}s ({clips_done}/{total_clips} clip)"
+                m_tot = est_total_sec // 60
+                s_tot = est_total_sec % 60
+                eta_str = f"⏱ Tempo stimato: {m_rem:02d}m {s_rem:02d}s rimanenti / ~{m_tot:02d}m {s_tot:02d}s totale previsto ({clips_done}/{total_clips} clip)"
             else:
-                eta_str = "✅ Analisi nomi e manovre completata!"
+                m_el = int(elapsed) // 60
+                s_el = int(elapsed) % 60
+                eta_str = f"✅ Analisi completata in {m_el:02d}m {s_el:02d}s ({total_clips} clip)"
 
             self.overall_progress.emit(eta_str, pct)
 
@@ -426,7 +474,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(MD3_STYLESHEET)
 
         self.settings = QSettings("SIVVideoAnalyzer", "Settings")
-        self.transcriber = SIVTranscriber(model_size="base")
+        self.transcriber = SIVTranscriber(model_size="small")
+        self.maneuver_detector = ManeuverDetector()
         self.video_files = []
         self.known_pilots = []
         self.pilot_gliders = {}
@@ -569,15 +618,17 @@ class MainWindow(QMainWindow):
         self.txt_pilots.setFixedHeight(75)
         c_layout.addWidget(self.txt_pilots)
 
-        # 4. Selezione Modello Whisper (Veloce vs Preciso)
+        # 4. Selezione Modello Whisper (Small vs Medium) & Configurazione Manovre
         m_row = QHBoxLayout()
-        lbl_mod = QLabel("Precisione Analisi Radio:")
+        m_row.setSpacing(10)
+
+        lbl_mod = QLabel("Precisione Analisi:")
         lbl_mod.setStyleSheet("font-size: 12px; font-weight: 600; color: #cbd5e1;")
         m_row.addWidget(lbl_mod)
 
         self.combo_model = QComboBox()
-        self.combo_model.addItem("⚡ Ultra Rapida (Consigliata durante il giorno)", "base")
-        self.combo_model.addItem("🎯 Alta Precisione (Consigliata per la sera)", "small")
+        self.combo_model.addItem("⚡ Bilanciata (Consigliata) - Whisper Small", "small")
+        self.combo_model.addItem("🎯 Alta Precisione (Massima accuratezza) - Whisper Medium", "medium")
         self.combo_model.setStyleSheet("""
             QComboBox {
                 background-color: #1a253c;
@@ -598,6 +649,28 @@ class MainWindow(QMainWindow):
             }
         """)
         m_row.addWidget(self.combo_model, stretch=1)
+
+        self.btn_config_maneuvers = QPushButton("⚙️ Configura Manovre & Retry")
+        self.btn_config_maneuvers.setStyleSheet("""
+            QPushButton {
+                background-color: #1a253c;
+                border: 1.5px solid #2a3b5c;
+                color: #38bdf8;
+                border-radius: 8px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background-color: #23314f;
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+        """)
+        self.btn_config_maneuvers.setToolTip("Personalizza l'elenco manovre attive e le frasi di ripetizione ('fanne un'altra', 'riproviamo')")
+        self.btn_config_maneuvers.clicked.connect(self._open_maneuvers_config)
+        m_row.addWidget(self.btn_config_maneuvers)
+
         c_layout.addLayout(m_row)
 
         c_layout.addSpacing(6)
@@ -736,18 +809,19 @@ class MainWindow(QMainWindow):
         top.addWidget(btn_reset)
         layout.addLayout(top)
 
-        # Tabella Voli Material 3
-        self.table_flights = QTableWidget(0, 7)
+        # Tabella Voli Material 3 (8 Colonne)
+        self.table_flights = QTableWidget(0, 8)
         self.table_flights.setHorizontalHeaderLabels([
-            "File Video", "Volo N°", "Pilota Assegnato", "Vela / Colore", "Esito / Certezza", "Chiamata Radio Riconosciuta", "Debriefing"
+            "File Video", "Data e Ora", "Volo N°", "Pilota Assegnato", "Vela / Colore", "Esito / Certezza", "Chiamata Radio Riconosciuta", "Debriefing"
         ])
         self.table_flights.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.table_flights.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        self.table_flights.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_flights.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_flights.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self.table_flights.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self.table_flights.verticalHeader().setDefaultSectionSize(42)
         self.table_flights.verticalHeader().setVisible(False)
         self.table_flights.setShowGrid(False)
@@ -834,9 +908,14 @@ class MainWindow(QMainWindow):
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
-        self.video_widget = QVideoWidget()
+        self.video_widget = SIVVideoWidget()
         self.video_widget.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
         self.video_widget.setStyleSheet("background-color: #000000; border-radius: 12px; border: 1px solid #1e293b;")
+        self.video_widget.fullScreenChanged.connect(self._on_fullscreen_changed)
+        self.video_widget.escape_pressed.connect(self._handle_escape)
+        self.video_widget.toggle_fullscreen_requested.connect(self._toggle_fullscreen)
+        self.video_widget.toggle_play_requested.connect(self._toggle_play)
+        self.video_widget.seek_requested.connect(self._seek)
         self.media_player.setVideoOutput(self.video_widget)
         v_layout.addWidget(self.video_widget, stretch=1)
 
@@ -991,12 +1070,24 @@ class MainWindow(QMainWindow):
             else:
                 self.txt_pilots.setText(saved_p)
 
+        saved_mod = self.settings.value("whisper_model", "small")
+        if saved_mod:
+            idx = self.combo_model.findData(saved_mod)
+            if idx >= 0:
+                self.combo_model.setCurrentIndex(idx)
+
     def _save_preferences(self):
         self.settings.setValue("source_dir", self.txt_folder.text().strip())
         self.settings.setValue("output_dir", self.txt_output.text().strip())
         pilots_txt = self.txt_pilots.toPlainText().strip() if hasattr(self.txt_pilots, "toPlainText") else self.txt_pilots.text().strip()
         self.settings.setValue("pilots", pilots_txt)
+        selected_model = self.combo_model.currentData() or "small"
+        self.settings.setValue("whisper_model", selected_model)
         self.settings.sync()
+
+    def _open_maneuvers_config(self):
+        dlg = ManeuversConfigDialog(self.maneuver_detector, self)
+        dlg.exec()
 
     def start_session(self):
         folder = self.txt_folder.text().strip()
@@ -1050,48 +1141,45 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Nessun Video", "Nessun file video trovato nella cartella specificata.")
             return
 
-        # Popola la tabella e passa alla FASE 2
+        # 1. Cambia IMMEDIATAMENTE schermata per feedback istantaneo (< 10ms)
         self.table_flights.setRowCount(0)
-        self.stack.setCurrentIndex(1)
         self.lbl_table_header.setText(f"<b>Sessione:</b> {os.path.basename(folder)} ({len(self.video_files)} video)")
+        self.stack.setCurrentIndex(1)
+        QApplication.processEvents()
 
-        # Carica istantaneamente i metadati esistenti salvati
+        # 2. Carica istantaneamente i metadati esistenti salvati nei sidecar JSON
         videos_to_process = []
         for vf in self.video_files:
             sc = SidecarData(vf)
+            # Leggi data e ora salvata nel sidecar; se non presente, estraila e salvala per accessi futuri istantanei
+            rec_dt = sc.recorded_at
+            if not rec_dt:
+                rec_dt = get_formatted_video_datetime(vf)
+                if rec_dt and rec_dt != "—":
+                    sc.recorded_at = rec_dt
+                    sc.save()
+
             glider_col = sc.glider or self.pilot_gliders.get(sc.pilot_name.lower(), "")
             if sc.pilot_name:
                 calc_conf = 1.0 if sc.manual_override else (sc.confidence if sc.confidence > 0 else 0.90)
-                phrase = sc.radio_phrase
-
-                # Se non era ancora stata salvata nel sidecar, recuperala dalla cache delle trascrizioni se disponibile
-                if not phrase:
-                    base_name = os.path.splitext(os.path.basename(vf))[0]
-                    cache_file = os.path.join("temp", f"{base_name}_cache.json")
-                    cached = VideoTranscriptionCache.load(cache_file)
-                    if cached and cached.segments:
-                        det = PilotDetector(pilots_list=self.known_pilots)
-                        match_c = det.match_pilot_from_segments(vf, cached.segments)
-                        if match_c.matched_phrases:
-                            phrase = " | ".join(match_c.matched_phrases)
-                            sc.radio_phrase = phrase
-                            sc.save()
-
-                if not phrase:
-                    phrase = "— (Nessuna chiamata radio)" if not sc.manual_override else "Assegnato manualmente"
-
-                self._add_flight_row(vf, sc.pilot_name, sc.flight_number or 1, glider_col, phrase, is_confirmed=True, confidence=calc_conf)
+                phrase = sc.radio_phrase or ("— (Nessuna chiamata radio)" if not sc.manual_override else "Assegnato manualmente")
+                self._add_flight_row(vf, sc.pilot_name, sc.flight_number or 1, glider_col, phrase, is_confirmed=True, confidence=calc_conf, recorded_at=rec_dt)
             else:
-                self._add_flight_row(vf, "In attesa...", 1, "", "In coda di analisi...", is_confirmed=False)
+                self._add_flight_row(vf, "In attesa...", 1, "", "In coda di analisi...", is_confirmed=False, recorded_at=rec_dt)
                 videos_to_process.append(vf)
 
         # Avvia worker background non bloccante per quelli mancanti
         if videos_to_process:
-            selected_model = self.combo_model.currentData() or "base"
+            selected_model = self.combo_model.currentData() or "small"
             self.transcriber.set_model_size(selected_model)
             self.progress_overall.setValue(0)
             self.progress_overall.setVisible(True)
-            self.worker = AnalysisWorker(videos_to_process, pilot_names, self.transcriber)
+            self.worker = AnalysisWorker(
+                video_files=videos_to_process,
+                pilot_names=pilot_names,
+                transcriber=self.transcriber,
+                maneuver_detector=self.maneuver_detector
+            )
             self.worker.clip_analyzed.connect(self._on_clip_analyzed)
             self.worker.clip_progress.connect(self._on_clip_progress)
             self.worker.overall_progress.connect(self._on_overall_progress)
@@ -1155,8 +1243,8 @@ class MainWindow(QMainWindow):
 
         count = 0
         for r in range(self.table_flights.rowCount()):
-            # Pilota della riga r
-            p_combo = self.table_flights.cellWidget(r, 2)
+            # Pilota della riga r (Colonna 3)
+            p_combo = self.table_flights.cellWidget(r, 3)
             row_pilot = p_combo.currentText() if isinstance(p_combo, QComboBox) else ""
             if row_pilot.strip().lower() == pilot_name.strip().lower():
                 count += 1
@@ -1164,18 +1252,29 @@ class MainWindow(QMainWindow):
                     return count
         return max(1, count)
 
-    def _add_flight_row(self, video_path: str, pilot: str, flight_num: int, glider: str, phrases: str, is_confirmed: bool, confidence: float = 1.0):
+    def _add_flight_row(self, video_path: str, pilot: str, flight_num: int, glider: str, phrases: str, is_confirmed: bool, confidence: float = 1.0, recorded_at: str = ""):
         row = self.table_flights.rowCount()
         self.table_flights.blockSignals(True)
         self.table_flights.insertRow(row)
 
+        # Colonna 0: File Video
         fname = os.path.basename(video_path)
         item_file = QTableWidgetItem(fname)
         item_file.setFlags(item_file.flags() ^ Qt.ItemFlag.ItemIsEditable)
         item_file.setData(Qt.ItemDataRole.UserRole, video_path)
         self.table_flights.setItem(row, 0, item_file)
 
-        # Colonna 1: Volo N° con QSpinBox Material 3
+        # Colonna 1: Data e Ora di Registrazione (persistita e formattata)
+        if not recorded_at:
+            recorded_at = get_formatted_video_datetime(video_path)
+        item_dt = QTableWidgetItem(recorded_at)
+        item_dt.setFlags(item_dt.flags() ^ Qt.ItemFlag.ItemIsEditable)
+        item_dt.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item_dt.setForeground(QBrush(QColor("#94a3b8")))
+        item_dt.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        self.table_flights.setItem(row, 1, item_dt)
+
+        # Colonna 2: Volo N° con QSpinBox Material 3
         spin_flight = QSpinBox()
         spin_flight.setRange(1, 99)
         spin_flight.setValue(flight_num if flight_num and flight_num > 0 else 1)
@@ -1225,9 +1324,9 @@ class MainWindow(QMainWindow):
             }}
         """)
         spin_flight.valueChanged.connect(lambda val, r=row, p=video_path: self._on_flight_spin_changed(r, p, val))
-        self.table_flights.setCellWidget(row, 1, spin_flight)
+        self.table_flights.setCellWidget(row, 2, spin_flight)
 
-        # Colonna 2: Pilota Assegnato con QComboBox Material 3
+        # Colonna 3: Pilota Assegnato con QComboBox Material 3
         combo_pilot = QComboBox()
         combo_pilot.setEditable(True)
         combo_pilot.addItem("Da Assegnare")
@@ -1270,14 +1369,15 @@ class MainWindow(QMainWindow):
             }
         """)
         combo_pilot.currentTextChanged.connect(lambda text, r=row, p=video_path: self._on_pilot_combo_changed(r, p, text))
-        self.table_flights.setCellWidget(row, 2, combo_pilot)
+        self.table_flights.setCellWidget(row, 3, combo_pilot)
 
+        # Colonna 4: Vela / Colore
         item_glider = QTableWidgetItem(glider)
         item_glider.setForeground(QBrush(QColor("#06b6d4")))
         item_glider.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
-        self.table_flights.setItem(row, 3, item_glider)
+        self.table_flights.setItem(row, 4, item_glider)
 
-        # Colonna 4: Esito / Certezza (Barra durante l'analisi, Badge a fine analisi)
+        # Colonna 5: Esito / Certezza (Barra durante l'analisi, Badge a fine analisi)
         if is_confirmed:
             self._set_certainty_badge(row, confidence)
         else:
@@ -1301,15 +1401,15 @@ class MainWindow(QMainWindow):
                     border-radius: 7px;
                 }
             """)
-            self.table_flights.setCellWidget(row, 4, prog_bar)
+            self.table_flights.setCellWidget(row, 5, prog_bar)
 
-        # Colonna 5: Chiamata Radio
+        # Colonna 6: Chiamata Radio
         item_phrases = QTableWidgetItem(phrases)
         item_phrases.setFlags(item_phrases.flags() ^ Qt.ItemFlag.ItemIsEditable)
         item_phrases.setForeground(QBrush(QColor("#cbd5e1")))
-        self.table_flights.setItem(row, 5, item_phrases)
+        self.table_flights.setItem(row, 6, item_phrases)
 
-        # Colonna 6: Debriefing Material 3 Button
+        # Colonna 7: Debriefing Material 3 Button
         btn_watch = QPushButton("▶ Guarda")
         btn_watch.setStyleSheet("""
             QPushButton {
@@ -1325,12 +1425,12 @@ class MainWindow(QMainWindow):
             QPushButton:pressed { background-color: #0e7490; }
         """)
         btn_watch.clicked.connect(lambda _, p=video_path: self._open_debriefing(p))
-        self.table_flights.setCellWidget(row, 6, btn_watch)
+        self.table_flights.setCellWidget(row, 7, btn_watch)
         self.table_flights.blockSignals(False)
 
     def _set_certainty_badge(self, row: int, confidence: float):
         """Imposta un badge didattico chiaro al posto della barra al termine dell'analisi."""
-        self.table_flights.removeCellWidget(row, 4)
+        self.table_flights.removeCellWidget(row, 5)
         pct = int(confidence * 100) if confidence <= 1.0 else int(confidence)
         if pct >= 85:
             text = f"🟢 {pct}% Certo"
@@ -1347,7 +1447,7 @@ class MainWindow(QMainWindow):
         item.setForeground(QBrush(QColor(color)))
         item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-        self.table_flights.setItem(row, 4, item)
+        self.table_flights.setItem(row, 5, item)
 
     def _on_clip_progress(self, video_path: str, curr_sec: float, total_sec: float):
         """Aggiorna la progressione percentuale sulla specifica riga del video in analisi."""
@@ -1355,7 +1455,7 @@ class MainWindow(QMainWindow):
         for r in range(self.table_flights.rowCount()):
             item = self.table_flights.item(r, 0)
             if item and item.data(Qt.ItemDataRole.UserRole) == video_path:
-                bar = self.table_flights.cellWidget(r, 4)
+                bar = self.table_flights.cellWidget(r, 5)
                 if isinstance(bar, QProgressBar):
                     bar.setValue(pct)
                 break
@@ -1374,11 +1474,10 @@ class MainWindow(QMainWindow):
             if item and item.data(Qt.ItemDataRole.UserRole) == match.video_path:
                 self.table_flights.blockSignals(True)
 
-                # 1. Aggiorna pilota nel menu a tendina
-                combo_pilot = self.table_flights.cellWidget(r, 2)
+                # 1. Aggiorna pilota nel menu a tendina (Colonna 3)
+                combo_pilot = self.table_flights.cellWidget(r, 3)
                 if isinstance(combo_pilot, QComboBox):
                     combo_pilot.blockSignals(True)
-                    # Se il pilota non è presente nelle opzioni, aggiungilo
                     idx = combo_pilot.findText(match.detected_pilot)
                     if idx >= 0:
                         combo_pilot.setCurrentIndex(idx)
@@ -1387,9 +1486,8 @@ class MainWindow(QMainWindow):
                         combo_pilot.setCurrentText(match.detected_pilot)
                     combo_pilot.blockSignals(False)
 
-                # 2. Aggiorna numero di volo:
-                # Se è stato rilevato dalla radio usa quello; altrimenti calcola progressione cronologica automatica
-                spin_volo = self.table_flights.cellWidget(r, 1)
+                # 2. Aggiorna numero di volo (Colonna 2):
+                spin_volo = self.table_flights.cellWidget(r, 2)
                 final_flight_num = match.flight_number
                 if not final_flight_num or final_flight_num <= 0:
                     final_flight_num = self._calculate_auto_flight_number(match.detected_pilot, r)
@@ -1399,18 +1497,19 @@ class MainWindow(QMainWindow):
                     spin_volo.setValue(final_flight_num)
                     spin_volo.blockSignals(False)
 
-                # 3. Aggiorna vela abbinata
+                # 3. Aggiorna vela abbinata (Colonna 4)
                 glider_val = self.pilot_gliders.get(match.detected_pilot.lower(), "")
                 g_item = QTableWidgetItem(glider_val)
                 g_item.setForeground(QBrush(QColor("#38bdf8")))
-                self.table_flights.setItem(r, 3, g_item)
+                self.table_flights.setItem(r, 4, g_item)
 
-                # 4. Sostituisce la barra di progresso con il badge di certezza
+                # 4. Sostituisce la barra di progresso con il badge di certezza (Colonna 5)
                 conf = getattr(match, "confidence", 1.0) or 1.0
                 self._set_certainty_badge(r, conf)
 
+                # 5. Chiamata Radio (Colonna 6)
                 phr = " | ".join(match.matched_phrases) if match.matched_phrases else "—"
-                self.table_flights.setItem(r, 5, QTableWidgetItem(phr))
+                self.table_flights.setItem(r, 6, QTableWidgetItem(phr))
                 self.table_flights.blockSignals(False)
 
                 # Salva i dati effettivi nel sidecar
@@ -1443,18 +1542,18 @@ class MainWindow(QMainWindow):
         sc.manual_override = True
         sc.confidence = 1.0
 
-        # Aggiorna vela abbinata se nota
+        # Aggiorna vela abbinata se nota (Colonna 4)
         glider_val = self.pilot_gliders.get(pilot_name.lower(), "")
         if glider_val:
             sc.glider = glider_val
-            g_item = self.table_flights.item(row, 3)
+            g_item = self.table_flights.item(row, 4)
             if g_item:
                 g_item.setText(glider_val)
             else:
-                self.table_flights.setItem(row, 3, QTableWidgetItem(glider_val))
+                self.table_flights.setItem(row, 4, QTableWidgetItem(glider_val))
 
-        # Ricalcola automaticamente il numero di volo cronologico se non già specificato
-        spin_volo = self.table_flights.cellWidget(row, 1)
+        # Ricalcola automaticamente il numero di volo cronologico se non già specificato (Colonna 2)
+        spin_volo = self.table_flights.cellWidget(row, 2)
         if isinstance(spin_volo, QSpinBox):
             auto_num = self._calculate_auto_flight_number(pilot_name, row)
             spin_volo.blockSignals(True)
@@ -1468,14 +1567,14 @@ class MainWindow(QMainWindow):
         self._set_certainty_badge(row, 1.0)
 
     def _on_table_cell_edited(self, row: int, col: int):
-        """Salva modifiche manuali su celle residue (es. Colonna 3: Vela)."""
+        """Salva modifiche manuali su celle residue (es. Colonna 4: Vela)."""
         v_path = self.table_flights.item(row, 0).data(Qt.ItemDataRole.UserRole)
         if not v_path or not os.path.exists(v_path):
             return
 
         sc = SidecarData(v_path)
-        if col == 3:
-            sc.glider = self.table_flights.item(row, 3).text().strip()
+        if col == 4:
+            sc.glider = self.table_flights.item(row, 4).text().strip()
             sc.save()
 
     def _on_row_double_clicked(self, row: int, col: int):
@@ -1569,12 +1668,12 @@ class MainWindow(QMainWindow):
             if not item_file:
                 continue
             v_path = item_file.data(Qt.ItemDataRole.UserRole)
-            p_combo = self.table_flights.cellWidget(r, 2)
+            p_combo = self.table_flights.cellWidget(r, 3)
             p_name = p_combo.currentText().strip() if isinstance(p_combo, QComboBox) else ""
             if not p_name or p_name in ["Da Assegnare", "In attesa..."]:
                 continue
 
-            spin_f = self.table_flights.cellWidget(r, 1)
+            spin_f = self.table_flights.cellWidget(r, 2)
             fl_num = spin_f.value() if isinstance(spin_f, QSpinBox) else 1
 
             key = (p_name, fl_num)
@@ -1659,6 +1758,12 @@ class MainWindow(QMainWindow):
         elif self.stack.currentIndex() == 2:
             self._back_to_table()
 
+    def _on_fullscreen_changed(self, is_full: bool):
+        if is_full:
+            self.btn_fullscreen.setText("Normale (ESC)")
+        else:
+            self.btn_fullscreen.setText("⛶ Schermo Intero (F)")
+
     def _on_player_pos_changed(self, pos_ms: int):
         self.slider.setValue(pos_ms)
         pos_s = pos_ms // 1000
@@ -1692,11 +1797,19 @@ class MainWindow(QMainWindow):
         if not self.current_sidecar:
             return
         curr_s = self.media_player.position() / 1000.0
-        from PyQt6.QtWidgets import QInputDialog
-        title, ok = QInputDialog.getText(self, "Nuova Manovra", "Nome manovra:", text="Manovra SIV")
-        if ok and title:
-            self.current_sidecar.add_chapter(title=title, start=curr_s, end=curr_s + 15.0)
-            self._refresh_chapters_table()
+        active_mans = self.maneuver_detector.active_maneuvers if self.maneuver_detector else []
+        dlg = AddChapterQuickDialog(current_seconds=curr_s, active_maneuvers=active_mans, parent=self)
+        if dlg.exec():
+            title = dlg.selected_title
+            if title:
+                self.current_sidecar.add_chapter(
+                    title=title,
+                    start=round(curr_s, 2),
+                    end=round(curr_s + 15.0, 2),
+                    notes=dlg.selected_category
+                )
+                self.current_sidecar.save()
+                self._refresh_chapters_table()
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():

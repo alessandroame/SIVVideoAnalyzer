@@ -117,6 +117,14 @@ class SidecarData:
     def chapters(self, chapters_list: List[Dict[str, Any]]):
         self.data["chapters"] = chapters_list
 
+    @property
+    def recorded_at(self) -> str:
+        return self.data["metadata"].get("recorded_at", "")
+
+    @recorded_at.setter
+    def recorded_at(self, value: str):
+        self.data["metadata"]["recorded_at"] = value.strip()
+
     def add_chapter(self, title: str, start: float, end: float, notes: str = "", command: str = ""):
         self.data["chapters"].append({
             "title": title,
