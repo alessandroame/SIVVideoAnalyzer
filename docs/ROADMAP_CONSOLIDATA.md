@@ -34,84 +34,65 @@ flowchart TD
 
 ---
 
-### 🟢 FASE 1: Modello Dati e Manifest Portatile del Corso
-> **Obiettivo**: Rendere la cartella di output completamente autonoma, memorizzando anagrafica piloti (nomi, vele, colori) e metadati.
-
-- [ ] **1.1 Modulo `core/manifest_manager.py`**:
-  - Definizione e serializzazione di `corso_siv_manifest.json` (dati corso, lista piloti, marca/modello vela, colori vela).
-  - Definizione di `pilota_info.json` per ciascuna cartella pilota.
-- [ ] **1.2 Migrazione Cache da `temp/` locale a Cartella Output**:
-  - Salvare `trascrizione.json` e `capitoli.json` direttamente all'interno delle cartelle di volo del pilota, rendendo i dati indipendenti dal singolo computer.
+### 🟢 FASE 1: Modello Dati e Portabilità
+> **Stato**: ✅ COMPLETATA
+- [x] **File Sidecar Portatili `.siv.json` (`core/sidecar_manager.py`)**:
+  - Salva pilota, numero di volo, trascrizioni e capitoli direttamente accanto alle clip.
+  - Nessuna dipendenza dalla cartella locale: aprendo la cartella su un altro PC i dati sono pronti.
 
 ---
 
-### 🟢 FASE 2: Raggruppamento per Volo (Multi-Clip) & Nuova UI Piloti
-> **Obiettivo**: Consentire l'inserimento dettagliato dei piloti e raggruppare automaticamente anche più video sequenziali nello stesso volo.
-
-- [ ] **2.1 Editor Piloti nello Step 1 (Nome, Vela, Colori)**:
-  - Tabella / lista pilota con campi: *Nome Pilota*, *Modello Vela*, *Colori Vela*.
-  - Tasti rapidi `+ Aggiungi` / `Rimuovi`.
-  - Salvataggio bidirezionale (`QSettings` locale + `corso_siv_manifest.json` nell'output).
-- [ ] **2.2 Algoritmo Raggruppamento per Volo Multi-Clip (`core/flight_grouper.py`)**:
-  - Ordinamento cronologico delle clip di ciascun pilota.
-  - **Gestione Multi-Clip per singolo Volo**: le clip scattate a breve distanza di tempo l'una dall'altra (entro pochi minuti o spezzoni consecutivi) vengono raggruppate nello **stesso volo** (`Volo 1`: [clip1, clip2]). Solo un'interruzione prolungata (> 20-30 min, tempo di risalita in decollo) fa scattare il volo successivo (`Volo 2`).
-- [ ] **2.3 Revisione per Volo nello Step 2**:
-  - Aggiunta della colonna *Numero di Volo* (`Volo 1`, `Volo 2`, ...) nella tabella a schermo intero.
-  - Possibilità per l'istruttore di associare più clip allo stesso volo o separarle con 1 click.
-  - **Sostituzione del tasto finale**: *"Conferma ed Entra nel Debriefing ➡"* (salto istantaneo a Step 3 senza attendere rendering).
-- [ ] **2.4 Rilevamento Intelligente Video Già Analizzati nello Step 1**:
-  - Scansione preventiva della cache locale (`temp/`) e dell'output (`manifest`/cartelle volo).
-  - Notifica esplicita all'utente nello Step 1 sullo stato dei video (tutti analizzati vs parzialmente analizzati).
-  - Proposta dell'azione corretta: *"Analizza solo i video mancanti"* (invece di forzare la ri-analisi di tutto) oppure richiesta esplicita se passare alla revisione qualora siano tutti pronti, senza salti ciechi o inattesi.
+### 🟢 FASE 2: Raggruppamento per Volo & UI Registro Voli Live
+> **Stato**: ✅ COMPLETATA (Architettura Dual-Mode MD3)
+- [x] **Configurazione Piloti & Vele**:
+  - Input rapido `Nome - Colore Vela` con memoria persistente (`QSettings`).
+- [x] **Calcolo Intelligente Numero di Volo (`core/pilot_detector.py` & `core/flight_grouper.py`)**:
+  - Assegnazione automatica tramite comandi radio ("Volo 1", "Volo 2") e `creation_time` FFprobe.
+  - Spinbox interattivo per modifica manuale rapida con frecce stilizzate.
+- [x] **Tavolo di Lavoro Registro Voli Live (Streaming)**:
+  - Tabella in tempo reale che si popola man mano che i video vengono analizzati.
 
 ---
 
-### 🟢 FASE 3: Player Debriefing Immediato Multi-Clip (Pilota + Volo)
-> **Obiettivo**: Permettere all'istruttore di mostrare subito il volo appena concluso a lezione, anche se composto da più clip.
-
-- [ ] **3.1 Doppio Selettore nello Step 3**:
-  - Menu a tendina **Pilota** (con indicazione visiva della vela e colori: es. `Alessandro [Rush 6 - Rosso/Nero]`).
-  - Pulsanti / Selettore **Volo**: `[ ✈ Volo 1 (2 clip) | ✈ Volo 2 (1 clip) | ✈ Volo 3 (3 clip) ]`.
-- [ ] **3.2 Timeline Unificata Virtuale per Voli Multi-Clip**:
-  - Calcolo degli offset temporali tra le clip del volo: se il volo ha Clip 1 (3 min) e Clip 2 (2 min), la timeline dura 5 minuti totali.
-  - Tabella capitoli unificata con tutte le manovre del volo.
-  - Doppio click su una manovra: il player seleziona automaticamente la clip corretta e salta al minutaggio interno corretto in modo trasparente per l'utente, **senza richiedere alcun rendering o montaggio preventivo**.
-- [ ] **3.3 Editor Note Didattiche / Correzione Manovra**:
-  - Possibilità per l'istruttore di correggere il nome di una manovra o aggiungere un capitolo manuale con una nota didattica, salvando all'istante su `capitoli.json`.
+### 🟢 FASE 3: Debriefing Immediato & Player Manovre
+> **Stato**: ✅ COMPLETATA
+- [x] **Player Debriefing Integrato**:
+  - Transizione istantanea 1-click tra Tabella Voli e Player senza attendere il termine dell'analisi di tutti i file.
+  - Priorità istantanea: se l'istruttore apre un video, il worker calcola subito le manovre di quel video.
+- [x] **Capitoli & Note Didattiche**:
+  - Timeline interattiva con elenco manovre, timestamp di inizio/fine e comandi radio dell'istruttore.
 
 ---
 
-### 🟢 FASE 4: Modalità "Pure Replay" Plug & Play
-> **Obiettivo**: Aprire un corso già archiviato o una chiavetta USB su qualsiasi computer senza alcun ricalcolo.
-
-- [ ] **4.1 Pulsante "📂 Apri Sessione Esistente (Replay)" nello Step 1**:
-  - Selezione della cartella del corso (su PC o chiavetta USB).
-- [ ] **4.2 Auto-detection del Manifest**:
-  - Rilevamento di `corso_siv_manifest.json`.
-  - Caricamento istantaneo di piloti, vele, voli e capitoli.
-  - Transizione diretta allo **Step 3 (Player)** a zero consumo CPU/GPU.
+### 🟢 FASE 4: Hub di Esportazione per le Chiavette Piloti
+> **Stato**: ✅ COMPLETATA (Funzionalità Base & Batch)
+- [x] **Esportazione Video Volo (`core/flight_grouper.py - VideoExporter`)**:
+  - Esportazione singolo volo dal Debriefing Player in MP4.
+  - Esportazione batch *"📦 Esporta Tutti i Voli"* per tutti i piloti riconosciuti.
+  - Unione veloce multi-clip con stream copy FFmpeg (fallback re-encode).
+  - Generazione file capitoli YouTube (`*_capitoli.txt`).
 
 ---
 
-### 🟢 FASE 5: Hub di Esportazione per le Chiavette Piloti
-> **Obiettivo**: Creare a fine giornata/corso i video finiti da consegnare ai piloti.
+### 🟡 FASE 5: Ottimizzazioni Esperienza Utente & Avvio (PROSSIMI PASSI)
+> **Obiettivo**: Perfezionare la scansione iniziale e consentire l'apertura rapida di sessioni esistenti.
 
-- [ ] **5.1 Finestra di Dialogo "📦 Esporta Video Pilota / Chiavetta"**:
-  - Selezione del pilota o esportazione batch di tutti i piloti.
-  - Scelta della cartella/drive di destinazione (es. `E:\Chiavetta_Alessandro`).
-- [ ] **5.2 Opzioni di Formato**:
-  - *Opzione A*: Un video MP4 per ogni volo (concatenando le eventuali multi-clip di quel singolo volo) con capitoli YouTube (`.txt`).
-  - *Opzione B*: Video Master con tutti i voli concatenati in ordine cronologico.
-- [ ] **5.3 Titoli, Sovrimpressioni e Sottotitoli**:
-  - Generazione file `.srt` temporizzati con comandi radio e nomi manovre.
-  - Creazione cartelli di transizione tra i voli (*"Volo 1"*, *"Volo 2"*).
-  - (Opzionale) Overlay grafico burn-in FFmpeg in sovraimpressione durante la manovra.
+- [ ] **5.1 Rilevamento Intelligente Clip Già Analizzate all'Avvio**:
+  - Scansione rapida di `.siv.json` e cache locale.
+  - Segnalazione all'istruttore del numero di video già pronti.
+  - Opzione per elaborare solo i mancanti senza ri-trascrivere con Whisper.
+- [ ] **5.2 Pulsante "📂 Apri Sessione Esistente (Replay)"**:
+  - Caricamento istantaneo del Registro Voli da cartelle già elaborate.
+- [ ] **5.3 Wing Color Detector (Modulo Opzionale)**:
+  - Estrazione automatica colori vela da 2-3 frame chiave (filtraggio cielo HSV).
+  - Badge visivo cromatico nella colonna pilota.
 
 ---
 
-### 🟢 FASE 6: Standalone Executable (.exe) & Packaging
-> **Obiettivo**: Rilasciare un eseguibile standalone Windows pronto all'uso senza installare Python.
+### 🟡 FASE 6: Standalone Executable (.exe / .app) & Packaging
+> **Obiettivo**: Rilasciare un eseguibile standalone pronto all'uso senza dipendere da Python/terminale.
 
 - [ ] **6.1 Configurazione PyInstaller (.spec)**:
   - Inclusione binari FFmpeg, configurazione `siv_maneuvers.json` e modelli Whisper.
-- [ ] **6.2 Test di esecuzione standalone offline** su macchina pulita.
+- [ ] **6.2 Supporto Multi-Piattaforma (Windows .exe e macOS .app)**.
+

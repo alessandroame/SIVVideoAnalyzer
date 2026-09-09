@@ -1,24 +1,42 @@
 # VideoAnalyzer - TODO & Roadmap
 
-## Feature & Miglioramenti in Corso / Pianificati
+## 🚀 Prossimi Sviluppi & Feature Pianificate
 
-- [ ] **Wing Color Detector (Supporto Matching Pilota con Colore Vela)**
-  - [ ] Implementare modulo `core/wing_color_detector.py` per estrazione veloce frame (15%, 30%, 50% durata).
-  - [ ] Algoritmo leggero di filtraggio cielo/sfondo ed estrazione palette dominante in spazio HSV.
-  - [ ] Sistema di "Auto-learning" firme cromatiche: associa il colore della vela ai piloti confermati via radio.
-  - [ ] Integrazione in `core/pilot_detector.py` come booster/fallback per i video "Da Assegnare" o a bassa confidenza.
-  - [ ] Mostrare i colori dominanti della vela come badge/pallino visivo nella tabella di revisione Step 2 (`ui/step2_review_view.py`).
-- [ ] **Rilevamento Intelligente Video Già Analizzati (Step 1)**
-  - [ ] Scansione preventiva rapida (cache locale `temp/` e manifest/output `output_siv/`).
-  - [ ] Avviso chiaro nello Step 1 con stato dei video rilevati (già analizzati vs mancanti).
-  - [ ] Se tutti i video sono già stati analizzati: avvisa l'utente e chiedi conferma (es. procedere alla revisione o rieseguire da zero), evitando salti improvvisi non richiesti.
-  - [ ] Se solo alcuni video sono già analizzati: proponi esplicitamente *"Analizza solo i video mancanti"* (risparmiando tempo di trascrizione Whisper).
+### 1. Rilevamento Intelligente Clip Già Analizzate (Startup & Cache)
+- [ ] **Scansione Preventiva Rapida**: All'inserimento della cartella video, controllare la presenza di file sidecar `.siv.json` o cache `temp/`.
+- [ ] **Feedback Chiave per l'Istruttore**: Segnalare chiaramente lo stato (es. *"8 clip su 10 già pronte"*).
+- [ ] **Opzione Salto / Analisi Selettiva**: Consentire di cliccare *"Analizza solo i mancanti"* o *"Apri direttamente registro"* risparmiando tempo di trascrizione Whisper.
+
+### 2. Wing Color Detector (Matching Vela & Supporto Visivo)
+- [ ] **Modulo `core/wing_color_detector.py`**: Estrazione rapida frame chiave (15%, 30%, 50% durata).
+- [ ] **Filtraggio Cielo/Sfondo**: Estrazione palette cromatica dominante in spazio colore HSV.
+- [ ] **Badge Cromatico nel Registro**: Mostrare un pallino/badge con i colori principali della vela nella tabella voli.
+- [ ] **Fallback Assegnazione**: Supporto per assegnare le clip "Da Assegnare" quando la voce radio è coperta dal fruscio del vento.
+
+### 3. Modalità "Apri Sessione Esistente (Replay)"
+- [ ] **Pulsante dedicato nella Welcome Card**: Consente di aprire direttamente una cartella o chiavetta USB con video e metadati già pronti, passando subito al Registro Voli senza riconfigurare i piloti.
 
 ---
 
-## Completati
-- [x] Ordinamento temporale e smistamento video per data/ora fotocamera.
-- [x] Trascrizione vocale offline con Whisper su QThread asincrono.
-- [x] Riconoscimento radio del pilota e delle manovre SIV con fuzzy matching.
-- [x] Player multimediale con capitoli automatici per manovra e timeline interattiva.
-- [x] Raggruppamento multi-step guidato: Step 1 (Selezione/Configurazione) -> Step 2 (Revisione e Approvazione) -> Step 3 (Hub Montato).
+## ✅ Funzionalità Completate & Consolidate
+
+- [x] **Architettura Dual-Mode Reattiva (Material Design 3)**:
+  - Welcome & Setup $\leftrightarrow$ **Registro Voli Live** (Tabella Streaming) $\leftrightarrow$ **Debriefing Room** (Player Video & Capitoli).
+  - Eliminato il vecchio wizard rigido in favore di un flusso live senza tempi morti.
+- [x] **Trascrizione Vocale & Assegnazione Pilota**:
+  - Trascrizione Whisper offline su thread asincrono non bloccante.
+  - Riconoscimento chiamate radio con fuzzy matching su anagrafica piloti.
+- [x] **Rilevamento Intelligente Numero di Volo**:
+  - Identificazione automatica del volo (`Volo 1`, `Volo 2`...) dai comandi radio dell'istruttore e dalla data/ora fotocamera (`ffprobe`).
+  - Possibilità di modifica rapida del numero di volo con `QSpinBox` direttamente nella tabella.
+- [x] **Debriefing Zero-Render con Priorità Live**:
+  - L'istruttore può aprire qualsiasi clip all'istante: il worker analizza prioritariamente le manovre della clip selezionata.
+  - Player video integrato con timeline dei capitoli interattiva, note didattiche e comandi dell'istruttore.
+- [x] **Portabilità & File Sidecar `.siv.json`**:
+  - I dati di ciascun volo (pilota, numero di volo, capitoli e comandi) vengono salvati in file `.siv.json` portatili a fianco del video.
+- [x] **Esportazione Video Pilota & Chiavette USB**:
+  - Modulo `VideoExporter` integrato in `core/flight_grouper.py`.
+  - Esportazione singolo volo o batch ("Esporta Tutti i Voli") nella cartella per i piloti, con unione automatica clip e generazione file capitoli YouTube.
+- [x] **Compatibilità e Resilienza Icone UI**:
+  - Correzione frecce up/down degli spinbox e layout responsive dark slate & cyan.
+
