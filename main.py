@@ -5,9 +5,11 @@ import os
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
 from ui.main_window import MainWindow
 
 def main():
+    # Abilita rendering ad alta qualità e sincronizzazione GPU
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     

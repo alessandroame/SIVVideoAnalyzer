@@ -230,3 +230,103 @@ class FlightGrouper:
             siv_flights.append(flight)
 
         return siv_flights
+
+
+class VideoExporter:
+    """
+    Gestisce l'esportazione unificata dei video per ciascun pilota e volo:
+    - Raggruppa i video per pilota e numero di volo
+    - Unisce le clip cronologiche tramite FFmpeg (stream copy ultra-veloce o re-encoding)
+    - Genera il file capitoli YouTube 'capitoli_youtube.txt'
+    """
+    @staticmethod
+    def export_flight_video(
+        output_dir: str,
+        pilot_name: str,
+        flight_number: int,
+        video_paths: List[str],
+        chapters: Optional[List[dict]] = None,
+        progress_callback: Optional[callable] = None
+    ) -> str:
+        if not video_paths:
+            raise ValueError("Nessun video fornito per l'esportazione.")
+
+        import subprocess
+        from core.audio_extractor import get_ffmpeg_binary
+
+        os.makedirs(output_dir, exist_ok=True)
+        pilot_clean = pilot_name.strip().replace(" ", "_")
+        pilot_folder = os.path.join(output_dir, pilot_clean)
+        os.makedirs(pilot_folder, exist_ok=True)
+
+        target_mp4 = os.path.join(pilot_folder, f"{pilot_clean}_Volo_{flight_number:02d}.mp4")
+        target_yt = os.path.join(pilot_folder, f"{pilot_clean}_Volo_{flight_number:02d}_capitoli.txt")
+
+        ffmpeg_exe = get_ffmpeg_binary()
+
+        if len(video_paths) == 1:
+            if progress_callback:
+                progress_callback(f"Esportazione rapida {os.path.basename(target_mp4)}...")
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(video_paths[0]),
+                "-c", "copy",
+                str(target_mp4)
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                cmd = [
+                    ffmpeg_exe, "-y",
+                    "-i", str(video_paths[0]),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+                    "-c:a", "aac", "-b:a", "192k",
+                    str(target_mp4)
+                ]
+                subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        else:
+            if progress_callback:
+                progress_callback(f"Unione {len(video_paths)} clip in {os.path.basename(target_mp4)}...")
+
+            list_file = os.path.join(pilot_folder, "concat_list.txt")
+            with open(list_file, "w", encoding="utf-8") as f:
+                for vp in video_paths:
+                    safe_p = os.path.abspath(vp).replace("\\", "/")
+                    f.write(f"file '{safe_p}'\n")
+
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", str(list_file),
+                "-c", "copy",
+                str(target_mp4)
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                cmd = [
+                    ffmpeg_exe, "-y",
+                    "-f", "concat", "-safe", "0",
+                    "-i", str(list_file),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+                    "-c:a", "aac", "-b:a", "192k",
+                    str(target_mp4)
+                ]
+                subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            if os.path.exists(list_file):
+                try:
+                    os.remove(list_file)
+                except Exception:
+                    pass
+
+        # Genera file capitoli YouTube per il pilota
+        if chapters:
+            with open(target_yt, "w", encoding="utf-8") as f:
+                f.write(f"--- DEBRIEFING SIV: {pilot_name} - Volo {flight_number} ---\n\n")
+                for ch in chapters:
+                    start_s = int(ch.get("start", 0))
+                    mm = start_s // 60
+                    ss = start_s % 60
+                    title = ch.get("title", "Manovra")
+                    f.write(f"{mm:02d}:{ss:02d} {title}\n")
+
+        return target_mp4

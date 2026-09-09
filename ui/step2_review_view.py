@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QHeaderView, QComboBox, QFrame, QSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor
+from core.sidecar_manager import SidecarData
 
 class Step2ReviewView(QWidget):
     confirmed_signal = pyqtSignal()
@@ -167,16 +169,34 @@ class Step2ReviewView(QWidget):
         self.table.scrollToBottom()
 
     def on_watch_clicked(self, row: int):
-        # Aggiorna match correnti
+        # Aggiorna match correnti e salva istantaneamente nel sidecar JSON
         combo = self.table.cellWidget(row, 1)
         spin = self.table.cellWidget(row, 2)
         if combo and row < len(self.matches):
-            self.matches[row].detected_pilot = combo.currentText().strip() or "Da Assegnare"
+            pilot = combo.currentText().strip() or "Da Assegnare"
+            self.matches[row].detected_pilot = pilot
+        else:
+            pilot = self.matches[row].detected_pilot
+
         if spin and row < len(self.matches):
-            self.matches[row].flight_number = spin.value()
-        
-        pilot = self.matches[row].detected_pilot
-        f_num = self.matches[row].flight_number
+            f_num = spin.value()
+            self.matches[row].flight_number = f_num
+        else:
+            f_num = self.matches[row].flight_number
+
+        # Persistenza non distruttiva atomica nel sidecar
+        try:
+            v_path = getattr(self.matches[row], 'video_path', '')
+            if v_path and os.path.exists(v_path):
+                sc = SidecarData(v_path)
+                sc.pilot_name = pilot
+                sc.flight_number = f_num
+                sc.confidence = getattr(self.matches[row], 'confidence', 1.0)
+                sc.manual_override = True
+                sc.save()
+        except Exception as e:
+            print(f"[Step2] Errore salvataggio sidecar: {e}")
+
         self.open_flight_signal.emit(pilot, f_num)
 
     def set_data(self, matches, pilots_list=None):
@@ -192,4 +212,18 @@ class Step2ReviewView(QWidget):
                 match.detected_pilot = combo.currentText().strip() or "Da Assegnare"
             if spin:
                 match.flight_number = spin.value()
+
+            # Salva in sidecar
+            try:
+                v_path = getattr(match, 'video_path', '')
+                if v_path and os.path.exists(v_path):
+                    sc = SidecarData(v_path)
+                    sc.pilot_name = match.detected_pilot
+                    sc.flight_number = match.flight_number
+                    sc.confidence = getattr(match, 'confidence', 1.0)
+                    sc.manual_override = True
+                    sc.save()
+            except Exception as e:
+                print(f"[Step2] Errore salvataggio sidecar: {e}")
+
         self.confirmed_signal.emit()

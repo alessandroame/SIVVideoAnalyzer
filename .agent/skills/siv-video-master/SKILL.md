@@ -41,3 +41,28 @@ Questa skill fornisce all\'agente la duplice competenza:
 
 ### B. Threading & Reattività UI
 - Mantenere sempre la GUI PyQt6 fluida usando QThread e segnali (pyqtSignal) per qualsiasi operazione pesante (Whisper, FFmpeg, sorting).
+
+## 3. Contesto d'Uso: Ergonomia Cognitiva & Gestione dello Stress (Mission-Critical)
+
+### A. Profilo Utente & Condizioni Operative
+- L'utente tipo è un istruttore SIV reduce da ore sul gommone/spiaggia, sottoposto a intemperie, fatica fisica e forte tensione emotiva dovuta alla gestione in tempo reale della sicurezza e di emergenze in volo (stalli asimmetrici, cravatte, autorotazioni, ammaraggi con riserva).
+- Al momento del debriefing l'istruttore è in debito di energie e con "tunnel vision" cognitiva: deve spiegare gli errori a 10-15 allievi in ansia prima di cena.
+- **Assioma di Design:** L'interfaccia deve essere trattata come uno strumento di gestione dell'emergenza: zero frizione, zero parametri complessi, zero ambiguità, salvataggio continuo e automatico.
+
+### B. I Principi UX/UI Inviolabili ("Stress-Free SIV Workflow")
+1. **Flusso Lineare a 3 Sole Fasi Chiare:**
+   - **Fase 1 (Accoglienza / Rampa di Lancio):** Solo selezione cartella video (con memoria automatica dell'ultima usata) e roster piloti (aggiunta rapida). Un solo grande tasto primario di avvio (`Invio`).
+   - **Fase 2 (Tavolo di Lavoro / Registro Live):** Tabella essenziale con Giorno, Volo N°, Pilota/Vela, Stato. I dati si auto-popolano in background. Modifiche dirette nelle celle senza finestre modali o pulsanti "Salva".
+   - **Fase 3 (Aula Debriefing / Player):** Schermo grande, video a pieno schermo con tasto `F` o doppio clic (`ESC` per tornare), comandi a 1 mano (`Spazio` play/pause, frecce $\pm 5$s), capitoli manovre a destra cliccabili per saltare istantaneamente all'inizio dell'esercizio.
+2. **Priorità di Esecuzione Preemptive (Background Tasks):**
+   - **P1 (Priorità Assoluta):** Il video correntemente aperto nel player scavalca qualsiasi altra elaborazione in coda per mostrare subito le manovre all'allievo.
+   - **P2 (Media):** Riconoscimento nomi/voli nei video non ancora identificati.
+   - **P3 (Bassa):** Riconoscimento a tappeto di tutte le manovre della sessione.
+3. **Architettura Sidecar Non Distruttiva:**
+   - I file video sorgente su scheda SD non vengono mai modificati né aperti in scrittura.
+   - Tutte le annotazioni e i riconoscimenti risiedono in sidecar compatti `<video>.json`, garantendo portabilità istantanea su qualsiasi computer o chiavetta USB.
+4. **Feedback Visivo Immediato a Semaforo:**
+   - 🟢 Verde: Riconosciuto con certezza.
+   - 🟡 Giallo: Suggerimento da confermare con 1 clic (tasto Invio).
+   - ⏳ In elaborazione: Nessun blocco dell'interfaccia; il video rimane comunque riproducibile immediatamente.
+

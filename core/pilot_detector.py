@@ -121,16 +121,20 @@ class PilotDetector:
                 tokens = p_lower.split()
                 
                 # Match esatto parola intera
+                matched_this_seg = False
                 for token in tokens:
                     if len(token) > 2 and re.search(rf"\b{re.escape(token)}\b", text_lower):
                         candidate_scores[pilot] += 1.5
                         matched_phrases[pilot].append(f"[{seg.start:.1f}s] \"{seg.text}\"")
+                        matched_this_seg = True
+                        break
 
-                # Match fuzzy su frase
-                score = fuzz.partial_ratio(p_lower, text_lower)
-                if score >= 85:
-                    candidate_scores[pilot] += 1.0
-                    matched_phrases[pilot].append(f"[{seg.start:.1f}s] \"{seg.text}\"")
+                # Match fuzzy su frase (solo se non ha già matchato la parola esatta)
+                if not matched_this_seg:
+                    score = fuzz.partial_ratio(p_lower, text_lower)
+                    if score >= 85:
+                        candidate_scores[pilot] += 1.0
+                        matched_phrases[pilot].append(f"[{seg.start:.1f}s] \"{seg.text}\"")
 
         # 3. Riconoscimento vocale radio del NUMERO DI VOLO
         # Cerca pattern tipo: "primo volo", "volo uno", "secondo volo", "volo 2", "terzo volo", ecc.

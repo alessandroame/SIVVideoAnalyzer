@@ -5,8 +5,10 @@ from PyQt6.QtWidgets import (
     QFileDialog, QMessageBox, QTextEdit, QSplitter, QComboBox, QFrame
 )
 from PyQt6.QtCore import Qt, QUrl, QTime, pyqtSignal
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
+from core.sidecar_manager import SidecarData
 
 class ChaptersView(QWidget):
     pilot_selected_signal = pyqtSignal(str)
@@ -125,6 +127,21 @@ class ChaptersView(QWidget):
         self.slider.sliderMoved.connect(self.set_position)
         ctrl_layout.addWidget(self.slider)
 
+        self.btn_seek_back = QPushButton("⏪ -5s")
+        self.btn_seek_back.setStyleSheet("font-size: 13px; font-weight: bold; padding: 6px 12px;")
+        self.btn_seek_back.clicked.connect(lambda: self.seek_relative(-5000))
+        ctrl_layout.addWidget(self.btn_seek_back)
+
+        self.btn_seek_fwd = QPushButton("⏩ +5s")
+        self.btn_seek_fwd.setStyleSheet("font-size: 13px; font-weight: bold; padding: 6px 12px;")
+        self.btn_seek_fwd.clicked.connect(lambda: self.seek_relative(5000))
+        ctrl_layout.addWidget(self.btn_seek_fwd)
+
+        self.btn_fullscreen = QPushButton("⛶ Schermo Intero (F)")
+        self.btn_fullscreen.setStyleSheet("font-size: 13px; font-weight: bold; padding: 6px 14px; background-color: #334155; color: white;")
+        self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
+        ctrl_layout.addWidget(self.btn_fullscreen)
+
         player_layout.addLayout(ctrl_layout)
         splitter.addWidget(player_container)
 
@@ -177,6 +194,14 @@ class ChaptersView(QWidget):
         # Segnali player
         self.media_player.positionChanged.connect(self.position_changed)
         self.media_player.durationChanged.connect(self.duration_changed)
+
+        # Scorciatoie veloci a 1 sola mano per uso in aula debriefing sotto stress
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self.toggle_play)
+        QShortcut(QKeySequence(Qt.Key.Key_F), self, self.toggle_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.exit_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self.seek_relative(-5000))
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self.seek_relative(5000))
+        QShortcut(QKeySequence(Qt.Key.Key_M), self, self.add_manual_chapter)
 
     def set_pilots_list(self, pilots: list, current_pilot: str = None):
         self.combo_pilots.blockSignals(True)
@@ -325,3 +350,36 @@ class ChaptersView(QWidget):
             with open(save_path, "w", encoding="utf-8") as f:
                 f.write(yt_text)
             QMessageBox.information(self, "Esportazione Completata", f"Capitoli salvati in:\n{save_path}")
+
+    def seek_relative(self, offset_ms: int):
+        new_pos = max(0, min(self.media_player.position() + offset_ms, self.media_player.duration()))
+        self.media_player.setPosition(new_pos)
+
+    def toggle_fullscreen(self):
+        if self.video_widget.isFullScreen():
+            self.exit_fullscreen()
+        else:
+            self.video_widget.setFullScreen(True)
+            self.btn_fullscreen.setText("Normale (ESC)")
+
+    def exit_fullscreen(self):
+        if self.video_widget.isFullScreen():
+            self.video_widget.setFullScreen(False)
+            self.btn_fullscreen.setText("⛶ Schermo Intero (F)")
+
+    def sync_to_sidecar(self):
+        """Salva istantaneamente i capitoli correnti nel sidecar JSON senza toccare l'MP4 originale."""
+        if not self.current_video_path:
+            return
+        sidecar = SidecarData(self.current_video_path)
+        ch_data = []
+        for ch in self.chapters:
+            ch_data.append({
+                "title": getattr(ch, "maneuver_name", ""),
+                "start": round(getattr(ch, "start_time", 0.0), 2),
+                "end": round(getattr(ch, "end_time", 0.0), 2),
+                "instructor_command": getattr(ch, "transcription_text", ""),
+                "notes": getattr(ch, "category", "")
+            })
+        sidecar.chapters = ch_data
+        sidecar.save()
