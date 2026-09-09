@@ -66,3 +66,14 @@ Questa skill fornisce all\'agente la duplice competenza:
    - 🟡 Giallo: Suggerimento da confermare con 1 clic (tasto Invio).
    - ⏳ In elaborazione: Nessun blocco dell'interfaccia; il video rimane comunque riproducibile immediatamente.
 
+## 4. Modularità del Codice & Separation of Concerns (SoC)
+
+Per garantire la massima manutenibilità, leggibilità e velocità di sviluppo dell'agente:
+- **Limite Dimensionale File**: Nessun file di interfaccia utente (`ui/`) deve superare le **350-400 righe**. Se un file si avvicina a questa soglia, va scomposto.
+- **Separazione dei Ruoli**:
+  1. `ui/workers.py`: Dedicato esclusivamente ai thread di background (`QThread`, `pyqtSignal`), elaborazioni asincrone (Whisper, export, worker queue).
+  2. `ui/components/`: Directory dedicata ai widget UI specializzati (es. `flight_table.py`, `debriefing_player.py`, `welcome_card.py`). Ogni widget gestisce solo il proprio layout e i propri eventi visivi.
+  3. `ui/dialogs/`: Finestre modali o dialoghi dedicati (es. `maneuvers_dialog.py`, `add_chapter_dialog.py`).
+  4. `ui/main_window.py`: Orchestratore ad alto livello ("direttore d'orchestra"). Si limita a istanziare i componenti, comporre il layout generale (`QStackedWidget` / `QSplitter`) e connettere i segnali PyQt tra componenti e worker. Non contiene logica grafica pesante né logica di elaborazione.
+
+
