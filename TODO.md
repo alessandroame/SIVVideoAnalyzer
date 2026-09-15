@@ -8,6 +8,21 @@
 
 ## ✅ Funzionalità Completate & Consolidate
 
+- [x] **Dual-Tracking Sincronizzato nel Player (Riquadro Corpo Pilota & Riquadro Vela)**:
+  - **Backend Computer Vision & Tracking (`core/tracking/`)**:
+    - [`core/tracking/wing_tracker.py`](file:///d:/Github/VideoAnalyzer/core/tracking/wing_tracker.py): segmentazione cromatica HSV vettoriale per isolamento vela da cielo e lago, calcolo bounding box con percentili (1% e 99%) e padding dinamico per non tagliare le estremità dell'ala.
+    - [`core/tracking/pilot_tracker.py`](file:///d:/Github/VideoAnalyzer/core/tracking/pilot_tracker.py): tracciamento del corpo del pilota basato sull'ancoraggio fisico al pendolo della calotta e sull'analisi del gradiente locale ad alto contrasto dell'imbrago.
+    - [`core/tracking/smoother.py`](file:///d:/Github/VideoAnalyzer/core/tracking/smoother.py): stabilizzatore temporale con filtro esponenziale (EMA dinamico con velocity boost) per eliminare il tremolio della camera e interpolatore continuo per qualsiasi framerate di riproduzione.
+    - [`core/tracking/pipeline.py`](file:///d:/Github/VideoAnalyzer/core/tracking/pipeline.py): pipeline di scansione video ad alte prestazioni con PyAV (`av`).
+    - [`core/sidecar_manager.py`](file:///d:/Github/VideoAnalyzer/core/sidecar_manager.py): persistenza automatica del blocco `tracking` nei file sidecar `.json` per riapertura istantanea su qualsiasi PC (zero ricalcoli).
+  - **Frontend & Rendering PyQt6 (`ui/`)**:
+    - [`ui/components/tracking_pip_widget.py`](file:///d:/Github/VideoAnalyzer/ui/components/tracking_pip_widget.py): widget Picture-in-Picture con bordi cromatici tematici (Ciano per Pilota, Arancio per Vela), zoom dinamico regolabile con rotellina del mouse (1.0x - 3.0x), trascinamento libero con il mouse e doppio clic per focus.
+    - [`ui/components/tracking_overlay.py`](file:///d:/Github/VideoAnalyzer/ui/components/tracking_overlay.py): overlay trasparente sul video master che intercetta i fotogrammi da `QVideoSink.videoFrameChanged` ed estrae i crop in tempo reale (~10 ms), disegnando i riquadri di delimitazione coordinati.
+    - [`ui/tracking_worker.py`](file:///d:/Github/VideoAnalyzer/ui/tracking_worker.py): worker asincrono (`QThread`) con feedback in tempo reale dello stato di avanzamento.
+    - [`ui/components/siv_video_widget.py`](file:///d:/Github/VideoAnalyzer/ui/components/siv_video_widget.py): isolamento del componente video per rispettare i limiti dimensionali dei file.
+    - Pulsante dedicato `🎯 Tracking (T)` nella barra comandi del player e scorciatoia globale tasto `T` per attivare o nascondere i riquadri all'istante con una sola mano.
+    - Suite di test dedicata in [`tests/test_tracking.py`](file:///d:/Github/VideoAnalyzer/tests/test_tracking.py) (6 test superati con successo).
+
 - [x] **Feedback & Progressione Live Rilevamento Manovre & Selezione Engine**:
   - Tasto **🎯 Rileva Manovre...** dedicato nel player video di debriefing con finestra di selezione engine/modello Whisper (`small`, `medium`, `large-v3`).
   - Segnalazione dello stato e avanzamento percentuale del rilevamento manovre sia nel player video di debriefing che nella tabella voli.

@@ -13,41 +13,9 @@ from ui.add_chapter_dialog import AddChapterQuickDialog
 from ui.detect_engine_dialog import DetectManeuversEngineDialog
 from ui.transcription_inspector_dialog import TranscriptionInspectorDialog
 from ui.wing_color_inspector_dialog import WingColorInspectorDialog
-
-class SIVVideoWidget(QVideoWidget):
-    """QVideoWidget con gestione integrata della tastiera in modalità a tutto schermo."""
-    escape_pressed = pyqtSignal()
-    toggle_fullscreen_requested = pyqtSignal()
-    toggle_play_requested = pyqtSignal()
-    seek_requested = pyqtSignal(int)
-
-    def keyPressEvent(self, event):
-        key = event.key()
-        if key == Qt.Key.Key_Escape:
-            if self.isFullScreen():
-                self.setFullScreen(False)
-            self.escape_pressed.emit()
-            event.accept()
-        elif key == Qt.Key.Key_F:
-            self.setFullScreen(not self.isFullScreen())
-            self.toggle_fullscreen_requested.emit()
-            event.accept()
-        elif key == Qt.Key.Key_Space:
-            self.toggle_play_requested.emit()
-            event.accept()
-        elif key == Qt.Key.Key_Left:
-            self.seek_requested.emit(-5000)
-            event.accept()
-        elif key == Qt.Key.Key_Right:
-            self.seek_requested.emit(5000)
-            event.accept()
-        else:
-            super().keyPressEvent(event)
-
-    def mouseDoubleClickEvent(self, event):
-        self.setFullScreen(not self.isFullScreen())
-        self.toggle_fullscreen_requested.emit()
-        event.accept()
+from ui.components.tracking_overlay import TrackingOverlayWidget
+from ui.components.siv_video_widget import SIVVideoWidget
+from ui.tracking_worker import TrackingWorker
 
 
 class DebriefingPlayerWidget(QWidget):
@@ -135,7 +103,15 @@ class DebriefingPlayerWidget(QWidget):
         self.video_widget.toggle_fullscreen_requested.connect(self.toggle_fullscreen)
         self.video_widget.toggle_play_requested.connect(self.toggle_play)
         self.video_widget.seek_requested.connect(self.seek)
+        self.video_widget.toggle_tracking_requested.connect(self.toggle_tracking)
         self.media_player.setVideoOutput(self.video_widget)
+
+        # Overlay tracciamento Pilota e Vela
+        self.tracking_overlay = TrackingOverlayWidget(parent=self.video_widget)
+        self.video_widget.tracking_overlay = self.tracking_overlay
+        self.video_sink = self.video_widget.videoSink()
+        self.video_sink.videoFrameChanged.connect(self._on_video_frame)
+
         v_layout.addWidget(self.video_widget, stretch=1)
 
         # Controlli playback
@@ -194,6 +170,22 @@ class DebriefingPlayerWidget(QWidget):
         """)
         btn_seek_f.clicked.connect(lambda: self.seek(5000))
         ctrl_bar.addWidget(btn_seek_f)
+
+        self.btn_tracking = QPushButton("🎯 Tracking (T)")
+        self.btn_tracking.setStyleSheet("""
+            QPushButton {
+                padding: 8px 14px;
+                font-weight: 700;
+                background-color: #0369a1;
+                color: #ffffff;
+                border: 1px solid #38bdf8;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #0284c7; }
+        """)
+        self.btn_tracking.setToolTip("Mostra/nasconde i due riquadri di tracciamento di Pilota e Vela (Scorciatoia: T)")
+        self.btn_tracking.clicked.connect(self.toggle_tracking)
+        ctrl_bar.addWidget(self.btn_tracking)
 
         self.btn_fullscreen = QPushButton("⛶ Schermo Intero (F)")
         self.btn_fullscreen.setStyleSheet("""
@@ -326,6 +318,23 @@ class DebriefingPlayerWidget(QWidget):
         self.btn_inspect_wing_color.clicked.connect(self._on_inspect_wing_color_clicked)
         r_layout.addWidget(self.btn_inspect_wing_color)
 
+        self.btn_calc_tracking = QPushButton("🎯 Calcola Tracciamento (PiP)")
+        self.btn_calc_tracking.setStyleSheet("""
+            QPushButton {
+                padding: 7px;
+                font-weight: 600;
+                font-size: 11px;
+                background-color: transparent;
+                color: #38bdf8;
+                border: 1px dashed #0284c7;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #1e293b; color: #ffffff; border-color: #38bdf8; }
+        """)
+        self.btn_calc_tracking.setToolTip("Avvia la scansione e stabilizzazione automatica delle coordinate di Pilota e Vela per questa clip.")
+        self.btn_calc_tracking.clicked.connect(self._on_calc_tracking_clicked)
+        r_layout.addWidget(self.btn_calc_tracking)
+
         splitter.addWidget(right_panel)
         splitter.setSizes([840, 320])
         layout.addWidget(splitter, stretch=1)
@@ -357,6 +366,12 @@ class DebriefingPlayerWidget(QWidget):
         pilot = self.current_sidecar.pilot_name or "Pilota"
         fl = f" - Volo {self.current_sidecar.flight_number}" if self.current_sidecar.flight_number else ""
         self.lbl_flight_title.setText(f"{pilot}{fl} ({os.path.basename(video_path)})")
+
+        self.tracking_overlay.set_sidecar(self.current_sidecar)
+        if self.current_sidecar.has_tracking():
+            self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
+        else:
+            self.btn_calc_tracking.setText("🎯 Calcola Tracciamento (PiP)")
 
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.media_player.play()
@@ -500,3 +515,65 @@ class DebriefingPlayerWidget(QWidget):
     def exit_fullscreen(self):
         self.video_widget.setFullScreen(False)
         self.btn_fullscreen.setText("⛶ Schermo Intero (F)")
+
+    def toggle_tracking(self):
+        is_visible = self.tracking_overlay.toggle_tracking()
+        if is_visible:
+            self.btn_tracking.setText("🎯 Tracking ON (T)")
+            self.btn_tracking.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 14px;
+                    font-weight: 700;
+                    background-color: #0369a1;
+                    color: #ffffff;
+                    border: 1px solid #38bdf8;
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background-color: #0284c7; }
+            """)
+        else:
+            self.btn_tracking.setText("🎯 Tracking OFF (T)")
+            self.btn_tracking.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 14px;
+                    font-weight: 600;
+                    background-color: #131b2e;
+                    color: #94a3b8;
+                    border: 1px solid #23314f;
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background-color: #1c263d; border-color: #38bdf8; }
+            """)
+
+    def _on_video_frame(self, frame):
+        if self.current_sidecar:
+            curr_s = self.media_player.position() / 1000.0
+            self.tracking_overlay.handle_video_frame(frame, curr_s)
+
+    def _on_calc_tracking_clicked(self):
+        if not self.current_video_path:
+            return
+        self.set_maneuver_progress(self.current_video_path, "Calcolo tracciamento Pilota & Vela in corso...", 15)
+        self.btn_calc_tracking.setEnabled(False)
+
+        self.tracking_worker = TrackingWorker(self.current_video_path, parent=self)
+        self.tracking_worker.progress.connect(
+            lambda pct, msg: self.set_maneuver_progress(self.current_video_path, msg, pct)
+        )
+        self.tracking_worker.finished.connect(self._on_tracking_finished)
+        self.tracking_worker.error.connect(self._on_tracking_error)
+        self.tracking_worker.start()
+
+    def _on_tracking_finished(self, video_path: str, tracking_dict: dict):
+        self.btn_calc_tracking.setEnabled(True)
+        if self.current_video_path == video_path:
+            self.current_sidecar = SidecarData(video_path)
+            self.tracking_overlay.set_sidecar(self.current_sidecar)
+            self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
+            self.set_maneuver_progress(video_path, "Tracciamento Pilota & Vela completato!", 100)
+
+    def _on_tracking_error(self, video_path: str, err_msg: str):
+        self.btn_calc_tracking.setEnabled(True)
+        if self.current_video_path == video_path:
+            self.set_maneuver_progress(video_path, f"Errore tracciamento: {err_msg}", 100)
+

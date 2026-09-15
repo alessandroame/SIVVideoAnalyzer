@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         # Scorciatoie globali
         QShortcut(QKeySequence(Qt.Key.Key_Space), self, self._toggle_play)
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._toggle_fullscreen)
+        QShortcut(QKeySequence(Qt.Key.Key_T), self, self._toggle_tracking)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._handle_escape)
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self._seek(-5000))
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self._seek(5000))
@@ -375,6 +376,10 @@ class MainWindow(QMainWindow):
     def _toggle_fullscreen(self):
         if self.stack.currentIndex() == 2:
             self.page_player.toggle_fullscreen()
+
+    def _toggle_tracking(self):
+        if self.stack.currentIndex() == 2:
+            self.page_player.toggle_tracking()
 
     def _handle_escape(self):
         if self.stack.currentIndex() == 2:

@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 class SidecarData:
     """
@@ -166,3 +166,29 @@ class SidecarData:
         })
         self.data["chapters"].sort(key=lambda x: x.get("start", 0.0))
         self.save()
+
+    @property
+    def tracking(self) -> Optional[Dict[str, Any]]:
+        """Restituisce il blocco dati del tracciamento pilota e vela."""
+        return self.data.get("tracking")
+
+    @tracking.setter
+    def tracking(self, tracking_dict: Optional[Dict[str, Any]]):
+        self.data["tracking"] = tracking_dict
+
+    def has_tracking(self) -> bool:
+        """Verifica se il file sidecar dispone già dei dati di tracciamento calcolati."""
+        tr = self.data.get("tracking")
+        return bool(tr and tr.get("trajectory"))
+
+    def get_tracking_boxes_at(self, time_sec: float) -> Tuple[Optional[List[int]], Optional[List[int]]]:
+        """
+        Ritorna (pilot_box, wing_box) interpolati per il timestamp specificato.
+        Ciascun box è espresso in coordinate assolute [x, y, w, h].
+        """
+        tr = self.data.get("tracking")
+        if not tr or not tr.get("trajectory"):
+            return None, None
+        from core.tracking.smoother import TrajectorySmoother
+        return TrajectorySmoother.interpolate_boxes_at(tr["trajectory"], time_sec)
+

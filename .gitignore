@@ -12,5 +12,6 @@ __pycache__/
 *.mp3
 temp/
 output/
+output_siv/
 .vscode/
 .idea/
