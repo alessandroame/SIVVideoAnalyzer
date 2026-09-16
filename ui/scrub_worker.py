@@ -32,6 +32,10 @@ class ScrubWorker(QThread):
         if not cap.isOpened():
             return
 
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if not fps or fps <= 0:
+            fps = 25.0
+
         last_ms = -1
         while self._running:
             target = None
@@ -44,8 +48,12 @@ class ScrubWorker(QThread):
 
             if target is not None and target != last_ms:
                 last_ms = target
-                cap.set(cv2.CAP_PROP_POS_MSEC, target)
+                frame_idx = max(0, int(round((target / 1000.0) * fps)))
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                 ret, frame = cap.read()
+                if not ret:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, target)
+                    ret, frame = cap.read()
                 if ret and self._running:
                     h, w, _ = frame.shape
                     # Conversione rapida da BGR a RGB per QImage

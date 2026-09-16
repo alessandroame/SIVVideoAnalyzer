@@ -89,8 +89,8 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_F), self, self._toggle_fullscreen)
         QShortcut(QKeySequence(Qt.Key.Key_T), self, self._toggle_tracking)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self._handle_escape)
-        QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self._seek(-5000))
-        QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self._seek(5000))
+        QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self._handle_arrow_nav(-1))
+        QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self._handle_arrow_nav(1))
 
     def _load_saved_preferences(self):
         saved_f = self.settings.value("source_dir", "")
@@ -241,10 +241,11 @@ class MainWindow(QMainWindow):
         self.page_welcome._on_launch_clicked()
 
     def _open_debriefing(self, video_path: str):
-        self.page_player.open_video(video_path)
+        bg_running = bool(self.worker and self.worker.isRunning())
+        self.page_player.open_video(video_path, auto_calc_tracking=not bg_running)
         sc = SidecarData(video_path)
         if not sc.chapters or not sc.has_tracking():
-            if self.worker and self.worker.isRunning():
+            if bg_running:
                 self.worker.request_priority_video(video_path)
             elif not sc.chapters:
                 self._man_worker = ManeuverCalculationWorker(
@@ -385,6 +386,10 @@ class MainWindow(QMainWindow):
     def _seek(self, offset_ms: int):
         if self.stack.currentIndex() == 2:
             self.page_player.seek(offset_ms)
+
+    def _handle_arrow_nav(self, direction: int):
+        if self.stack.currentIndex() == 2:
+            self.page_player.handle_arrow_nav(direction)
 
     def _toggle_fullscreen(self):
         if self.stack.currentIndex() == 2:

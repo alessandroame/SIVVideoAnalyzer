@@ -24,6 +24,8 @@ class TrackingPanelWidget(QFrame):
         super().__init__(parent)
         self.current_sidecar: Optional[SidecarData] = None
         self._last_update_time: float = 0.0
+        self._smooth_crop_w: Optional[Tuple[float, float, float, float]] = None
+        self._smooth_crop_p: Optional[Tuple[float, float, float, float]] = None
         self._init_ui()
 
     def _init_ui(self):
@@ -77,6 +79,8 @@ class TrackingPanelWidget(QFrame):
     def set_sidecar(self, sidecar: Optional[SidecarData]):
         """Assegna il sidecar del volo corrente e aggiorna lo stato visivo."""
         self.current_sidecar = sidecar
+        self._smooth_crop_w = None
+        self._smooth_crop_p = None
         if not sidecar:
             self.lbl_status.setText("⚪ Nessun video")
             self.lbl_status.setStyleSheet("font-size: 10px; font-weight: 600; color: #94a3b8;")
@@ -103,6 +107,52 @@ class TrackingPanelWidget(QFrame):
         qimg = frame.toImage()
         self.handle_qimage_frame(qimg, curr_time_sec)
 
+    def _apply_pip_smoothing(
+        self,
+        target_rect: QRect,
+        subject: str,
+        img_w: int,
+        img_h: int,
+        force: bool = False
+    ) -> QRect:
+        """Filtro cinematico fluido (smooth camera gimbal) per il PiP per eliminare ogni vibrazione."""
+        if target_rect.isEmpty():
+            return target_rect
+
+        t_box = (
+            float(target_rect.x()),
+            float(target_rect.y()),
+            float(target_rect.width()),
+            float(target_rect.height())
+        )
+        last_box = self._smooth_crop_w if subject == "wing" else self._smooth_crop_p
+
+        if force or last_box is None:
+            if subject == "wing":
+                self._smooth_crop_w = t_box
+            else:
+                self._smooth_crop_p = t_box
+            return target_rect
+
+        # Smoothing fluido esponenziale con alpha = 0.30
+        alpha = 0.30
+        new_box = [
+            last_box[i] * (1.0 - alpha) + t_box[i] * alpha
+            for i in range(4)
+        ]
+
+        if subject == "wing":
+            self._smooth_crop_w = tuple(new_box)
+        else:
+            self._smooth_crop_p = tuple(new_box)
+
+        rx = max(0, min(img_w - 1, int(round(new_box[0]))))
+        ry = max(0, min(img_h - 1, int(round(new_box[1]))))
+        rw = min(img_w - rx, max(1, int(round(new_box[2]))))
+        rh = min(img_h - ry, max(1, int(round(new_box[3]))))
+
+        return QRect(rx, ry, rw, rh)
+
     def handle_qimage_frame(self, qimg: QImage, curr_time_sec: float, force: bool = False):
         """Estrae i crop corrispondenti a Pilota e Vela a partire da un QImage
         e comanda l'aggiornamento dei due visualizzatori.
@@ -126,28 +176,32 @@ class TrackingPanelWidget(QFrame):
         p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_time_sec)
         img_w, img_h = qimg.width(), qimg.height()
 
-        # Ritaglio Vela & Assetto (Vista Larga Panoramica)
+        # Ritaglio Vela & Assetto (Vista Larga Panoramica con camera smoothing)
         if w_box:
             ar_w = self.pip_wing.viewport_aspect_ratio()
-            crop_rect_w = self._compute_wide_crop_rect(w_box, img_w, img_h, target_ar=ar_w, pad_factor=1.45)
+            raw_crop_w = self._compute_wide_crop_rect(w_box, img_w, img_h, target_ar=ar_w, pad_factor=1.45)
+            crop_rect_w = self._apply_pip_smoothing(raw_crop_w, "wing", img_w, img_h, force=force)
             if not crop_rect_w.isEmpty():
                 crop_img = qimg.copy(crop_rect_w)
                 self.pip_wing.update_crop(crop_img)
             else:
                 self.pip_wing.update_crop(None)
         else:
+            self._smooth_crop_w = None
             self.pip_wing.update_crop(None)
 
-        # Ritaglio Corpo Pilota (Vista Larga Panoramica)
+        # Ritaglio Corpo Pilota (Vista Larga Panoramica con camera smoothing)
         if p_box:
             ar_p = self.pip_pilot.viewport_aspect_ratio()
-            crop_rect_p = self._compute_wide_crop_rect(p_box, img_w, img_h, target_ar=ar_p, pad_factor=1.50)
+            raw_crop_p = self._compute_wide_crop_rect(p_box, img_w, img_h, target_ar=ar_p, pad_factor=1.50)
+            crop_rect_p = self._apply_pip_smoothing(raw_crop_p, "pilot", img_w, img_h, force=force)
             if not crop_rect_p.isEmpty():
                 crop_img = qimg.copy(crop_rect_p)
                 self.pip_pilot.update_crop(crop_img)
             else:
                 self.pip_pilot.update_crop(None)
         else:
+            self._smooth_crop_p = None
             self.pip_pilot.update_crop(None)
 
     @staticmethod

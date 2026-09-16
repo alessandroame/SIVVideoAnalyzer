@@ -17,6 +17,7 @@ from ui.wing_color_inspector_dialog import WingColorInspectorDialog
 from ui.components.tracking_panel import TrackingPanelWidget
 from ui.components.siv_video_widget import SIVVideoWidget
 from ui.components.timeline_slider import SIVTimelineSlider
+from ui.components.keyframe_bar import KeyframeBar
 from ui.tracking_worker import TrackingWorker
 from ui.scrub_worker import ScrubWorker
 
@@ -112,6 +113,9 @@ class DebriefingPlayerWidget(QWidget):
         self.video_widget.arrow_nav_requested.connect(self.handle_arrow_nav)
         self.video_widget.toggle_tracking_requested.connect(self.toggle_tracking)
         self.video_widget.toggle_boxes_requested.connect(self.toggle_bounding_boxes)
+        self.video_widget.box_drag_started.connect(self._on_box_drag_started)
+        self.video_widget.box_interactively_modified.connect(self._on_box_interactively_modified)
+        self.video_widget.keyframe_committed.connect(self._on_keyframe_committed)
         self.media_player.setVideoOutput(self.video_widget.videoSink())
 
         # Splitter orizzontale: Video Principale + Pannello Tracciamento Vela e Pilota
@@ -137,7 +141,19 @@ class DebriefingPlayerWidget(QWidget):
         self.slider.valueChanged.connect(self._on_slider_value_changed)
         self.slider.drag_started.connect(self._on_drag_started)
         self.slider.drag_ended.connect(self._on_drag_ended)
+        self.slider.keyframe_delete_requested.connect(self._on_slider_keyframe_delete_requested)
         v_layout.addWidget(self.slider)
+
+        # Barra Keyframe per correzione interattiva del tracciamento
+        self.keyframe_bar = KeyframeBar()
+        self.keyframe_bar.add_keyframe_requested.connect(self._on_add_keyframe)
+        self.keyframe_bar.delete_keyframe_requested.connect(self._on_delete_keyframe)
+        self.keyframe_bar.prev_keyframe_requested.connect(self._on_prev_keyframe)
+        self.keyframe_bar.next_keyframe_requested.connect(self._on_next_keyframe)
+        self.keyframe_bar.reset_keyframes_requested.connect(self._on_reset_keyframes)
+        self.keyframe_bar.active_subject_changed.connect(self._on_active_subject_changed)
+        self.video_widget.active_subject_changed.connect(self.keyframe_bar.set_active_subject)
+        v_layout.addWidget(self.keyframe_bar)
 
         # Controlli playback
         ctrl_bar = QHBoxLayout()
@@ -400,7 +416,7 @@ class DebriefingPlayerWidget(QWidget):
         self.lbl_maneuver_status.setVisible(False)
         self.prog_maneuver.setVisible(False)
 
-    def open_video(self, video_path: str):
+    def open_video(self, video_path: str, auto_calc_tracking: bool = True):
         self.current_video_path = video_path
         self.current_sidecar = SidecarData(video_path)
 
@@ -422,11 +438,10 @@ class DebriefingPlayerWidget(QWidget):
             import cv2
             cap_tmp = cv2.VideoCapture(video_path)
             if cap_tmp.isOpened():
-                fps = cap_tmp.get(cv2.CAP_PROP_FPS)
-                if fps and fps > 1.0:
-                    self._fps = float(fps)
+                fps = cap_tmp.get(cv2.CAP_PROP_FPS) or 25.0
+                self._fps = float(fps)
                 fc = cap_tmp.get(cv2.CAP_PROP_FRAME_COUNT)
-                if fps > 0 and fc > 0:
+                if fc and fc > 0:
                     dur_ms = int((fc / fps) * 1000)
                     self.slider.setRange(0, dur_ms)
                 cap_tmp.release()
@@ -435,11 +450,14 @@ class DebriefingPlayerWidget(QWidget):
 
         if self.current_sidecar.has_tracking():
             self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
+            self.btn_calc_tracking.setEnabled(True)
         else:
             self.btn_calc_tracking.setText("⏳ Calcolo Tracciamento (PiP)...")
+            self.btn_calc_tracking.setEnabled(False)
             self.tracking_panel.set_status_all("Calcolo in corso...")
-            if not (hasattr(self, "tracking_worker") and self.tracking_worker and self.tracking_worker.isRunning()):
-                self._on_calc_tracking_clicked()
+            if auto_calc_tracking:
+                if not (hasattr(self, "tracking_worker") and self.tracking_worker and self.tracking_worker.isRunning()):
+                    self._on_calc_tracking_clicked()
 
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.media_player.play()
@@ -449,6 +467,7 @@ class DebriefingPlayerWidget(QWidget):
         else:
             self.set_maneuver_progress(video_path, "In attesa rilevamento manovre...", 10)
         self.refresh_chapters_table()
+        self._update_keyframes_ui()
 
     def update_chapters(self, video_path: str, chapters: list):
         if self.current_video_path == video_path:
@@ -613,12 +632,13 @@ class DebriefingPlayerWidget(QWidget):
     def step_frame(self, direction: int):
         """Avanza o retrocede di esattamente 1 singolo fotogramma."""
         fps = getattr(self, "_fps", 25.0) or 25.0
-        frame_ms = max(1, int(round(1000.0 / fps)))
+        cur_ms = self.media_player.position()
+        current_frame = int(round((cur_ms / 1000.0) * fps))
+        target_frame = max(0, current_frame + direction)
+        new_pos = int(round((target_frame / fps) * 1000.0))
         dur = self.media_player.duration()
-        target = self.media_player.position() + direction * frame_ms
         if dur > 0:
-            target = min(target, dur)
-        new_pos = max(0, target)
+            new_pos = min(new_pos, dur)
         self.slider.setValue(new_pos)
         self.media_player.setPosition(new_pos)
         if self._scrub_worker:
@@ -754,11 +774,29 @@ class DebriefingPlayerWidget(QWidget):
 
     def keyPressEvent(self, event):
         key = event.key()
+        modifiers = event.modifiers()
+
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            if key == Qt.Key.Key_Left:
+                self._on_prev_keyframe()
+                event.accept()
+                return
+            elif key == Qt.Key.Key_Right:
+                self._on_next_keyframe()
+                event.accept()
+                return
+
         if key == Qt.Key.Key_B:
             self.toggle_bounding_boxes()
             event.accept()
         elif key == Qt.Key.Key_T:
             self.toggle_tracking()
+            event.accept()
+        elif key == Qt.Key.Key_K:
+            self._on_add_keyframe(self.keyframe_bar.active_subject)
+            event.accept()
+        elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self._on_delete_keyframe(self.keyframe_bar.active_subject)
             event.accept()
         elif key == Qt.Key.Key_Space:
             self.toggle_play()
@@ -772,6 +810,107 @@ class DebriefingPlayerWidget(QWidget):
         else:
             super().keyPressEvent(event)
 
+    def _on_box_drag_started(self):
+        """Pausa automatica del playback quando l'utente inizia a trascinare un box di tracking."""
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.pause()
+
+    def _on_box_interactively_modified(self, subject: str, box: list):
+        """Aggiorna in tempo reale il PiP zoomato mentre l'utente trascina il box sul video."""
+        curr_s = self.media_player.position() / 1000.0
+        frame = self.video_widget._current_frame
+        if frame and self.tracking_panel.isVisible():
+            self.tracking_panel.handle_qimage_frame(frame, curr_s, force=True)
+
+    def _on_keyframe_committed(self, subject: str, box: list):
+        """Salva il keyframe creato dal rilascio del mouse, ricalcola e aggiorna la timeline."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        curr_s = self.media_player.position() / 1000.0
+        self.current_sidecar.add_tracking_keyframe(subject, curr_s, box)
+        self._update_keyframes_ui()
+
+    def _on_add_keyframe(self, subject: str):
+        """Aggiunge o blocca un keyframe al timestamp corrente."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        curr_s = self.media_player.position() / 1000.0
+        p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_s)
+        box = p_box if subject == "pilot" else w_box
+        if box:
+            self.current_sidecar.add_tracking_keyframe(subject, curr_s, box)
+            self._update_keyframes_ui()
+
+    def _on_delete_keyframe(self, subject: str):
+        """Rimuove il keyframe al timestamp corrente."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        curr_s = self.media_player.position() / 1000.0
+        removed = self.current_sidecar.remove_tracking_keyframe(subject, curr_s)
+        if not removed:
+            other = "wing" if subject == "pilot" else "pilot"
+            self.current_sidecar.remove_tracking_keyframe(other, curr_s)
+        self._update_keyframes_ui()
+
+    def _on_slider_keyframe_delete_requested(self, subject: str, t_sec: float):
+        """Eliminazione diretta di un keyframe tramite clic con il tasto destro sul diamante della timeline."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        removed = self.current_sidecar.remove_tracking_keyframe(subject, t_sec, tolerance=0.35)
+        if not removed:
+            other = "wing" if subject == "pilot" else "pilot"
+            self.current_sidecar.remove_tracking_keyframe(other, t_sec, tolerance=0.35)
+        self._update_keyframes_ui()
+
+    def _on_prev_keyframe(self):
+        """Salta al keyframe precedente rispetto alla posizione corrente."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        curr_s = self.media_player.position() / 1000.0
+        kfs = self.current_sidecar.get_tracking_keyframes()
+        all_times = sorted({kf["t"] for s in ("pilot", "wing") for kf in kfs.get(s, [])})
+        prev_times = [t for t in all_times if t < curr_s - 0.08]
+        if prev_times:
+            self._on_seek_requested(int(prev_times[-1] * 1000))
+
+    def _on_next_keyframe(self):
+        """Salta al keyframe successivo rispetto alla posizione corrente."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        curr_s = self.media_player.position() / 1000.0
+        kfs = self.current_sidecar.get_tracking_keyframes()
+        all_times = sorted({kf["t"] for s in ("pilot", "wing") for kf in kfs.get(s, [])})
+        next_times = [t for t in all_times if t > curr_s + 0.08]
+        if next_times:
+            self._on_seek_requested(int(next_times[0] * 1000))
+
+    def _on_reset_keyframes(self):
+        """Ripristina la traccia originale AI."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        self.current_sidecar.reset_tracking_keyframes()
+        self._update_keyframes_ui()
+
+    def _on_active_subject_changed(self, subject: str):
+        self.video_widget._active_target = subject
+
+    def _update_keyframes_ui(self):
+        """Sincronizza lo stato dei keyframe sulla barra, slider e riquadri."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            kfs = {"pilot": [], "wing": []}
+        else:
+            kfs = self.current_sidecar.get_tracking_keyframes()
+
+        self.keyframe_bar.set_keyframes(kfs)
+        self.slider.set_keyframes(kfs)
+
+        curr_s = self.media_player.position() / 1000.0
+        if self.current_sidecar and self.current_sidecar.has_tracking():
+            p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_s)
+            self.video_widget.set_bounding_boxes(p_box, w_box, force_repaint=True)
+            if self.tracking_panel.isVisible() and self.video_widget._current_frame:
+                self.tracking_panel.handle_qimage_frame(self.video_widget._current_frame, curr_s, force=True)
+
     def update_tracking(self, video_path: str, tracking_dict: dict):
         """Riceve l'esito del tracciamento calcolato in background."""
         if self.current_video_path == video_path:
@@ -780,13 +919,16 @@ class DebriefingPlayerWidget(QWidget):
     def set_tracking_progress(self, video_path: str, status_text: str, percent: int):
         """Riceve l'avanzamento del tracciamento calcolato in background."""
         if self.current_video_path == video_path:
-            self.set_maneuver_progress(video_path, f"Tracking: {status_text}", percent)
+            self.set_maneuver_progress(video_path, status_text, percent)
 
     def _on_calc_tracking_clicked(self):
         if not self.current_video_path:
             return
+        if hasattr(self, "tracking_worker") and self.tracking_worker and self.tracking_worker.isRunning():
+            return
         self.set_maneuver_progress(self.current_video_path, "Calcolo tracciamento Pilota & Vela in corso...", 15)
         self.btn_calc_tracking.setEnabled(False)
+        self.btn_calc_tracking.setText("⏳ Calcolo Tracciamento (PiP)...")
 
         self.tracking_worker = TrackingWorker(self.current_video_path, parent=self)
         self.tracking_worker.progress.connect(
@@ -803,10 +945,12 @@ class DebriefingPlayerWidget(QWidget):
             self.tracking_panel.set_sidecar(self.current_sidecar)
             self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
             self.set_maneuver_progress(video_path, "Tracciamento Pilota & Vela completato!", 100)
+            self._update_keyframes_ui()
 
     def _on_tracking_error(self, video_path: str, err_msg: str):
         self.btn_calc_tracking.setEnabled(True)
         if self.current_video_path == video_path:
             self.tracking_panel.set_status_all(f"Errore: {err_msg}")
             self.set_maneuver_progress(video_path, f"Errore tracciamento: {err_msg}", 100)
+
 

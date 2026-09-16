@@ -207,3 +207,58 @@ def test_timeline_slider_keypress(qapp):
     )
     slider.keyPressEvent(key_ev)
     assert len(seeks) == 1
+
+
+def test_timeline_slider_keyframes(qapp):
+    slider = SIVTimelineSlider()
+    slider.resize(500, 30)
+    slider.setRange(0, 60000)
+    slider.set_keyframes({
+        "pilot": [{"t": 12.5, "box": [100, 200, 50, 70]}],
+        "wing": [{"t": 24.0, "box": [80, 50, 120, 80]}]
+    })
+
+    # Verifica snap al keyframe (12.5s -> 12500 ms)
+    track = slider._get_track_rect()
+    kf_x = slider._val_to_x(12500, track)
+    click_x = kf_x + 3  # entro tolleranza di 8px
+
+    seek_values = []
+    slider.seek_requested.connect(seek_values.append)
+
+    ev_press = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(float(click_x), 15.0),
+        QPointF(float(click_x), 15.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier
+    )
+    slider.mousePressEvent(ev_press)
+    assert slider.value() == 12500
+
+    # Rendering con keyframe diamonds
+    pixmap = QPixmap(500, 30)
+    pixmap.fill(Qt.GlobalColor.black)
+    slider.render(pixmap)
+    assert not pixmap.isNull()
+
+    # Clic col tasto destro sul diamante del pilota (12.5s) per eliminarlo
+    deleted_events = []
+    slider.keyframe_delete_requested.connect(lambda s, t: deleted_events.append((s, t)))
+
+    ev_right_click = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(float(click_x), 15.0),
+        QPointF(float(click_x), 15.0),
+        Qt.MouseButton.RightButton,
+        Qt.MouseButton.RightButton,
+        Qt.KeyboardModifier.NoModifier
+    )
+    slider.mousePressEvent(ev_right_click)
+
+    assert len(deleted_events) == 1
+    assert deleted_events[0][0] == "pilot"
+    assert abs(deleted_events[0][1] - 12.5) < 0.05
+
+

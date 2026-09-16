@@ -13,13 +13,17 @@ class TrajectorySmoother:
     """
     def __init__(
         self,
-        alpha: float = 0.45,
+        alpha: float = 0.35,
+        alpha_size: Optional[float] = None,
         velocity_boost: float = 0.85,
-        max_jump_px: float = 380.0
+        max_jump_px: float = 650.0,
+        velocity_threshold: float = 20.0
     ):
         self.alpha = alpha
+        self.alpha_size = 0.25 if alpha_size is None else alpha_size
         self.velocity_boost = velocity_boost
         self.max_jump_px = max_jump_px
+        self.velocity_threshold = velocity_threshold
 
     def smooth_trajectory(
         self,
@@ -107,8 +111,8 @@ class TrajectorySmoother:
         return result
 
     def _smooth_box(self, prev_box: List[float], curr_box: List[int]) -> List[float]:
-        """Filtro esponenziale adattivo con outlier rejection."""
-        # Distanza euclidea tra i centri
+        """Filtro esponenziale adattivo e armonico con outlier rejection e stabilizzazione di posizione e dimensioni."""
+        # Calcolo centri euclidei
         prev_cx = prev_box[0] + prev_box[2] * 0.5
         prev_cy = prev_box[1] + prev_box[3] * 0.5
         curr_cx = curr_box[0] + curr_box[2] * 0.5
@@ -119,25 +123,42 @@ class TrajectorySmoother:
         # Outlier Rejection: se il box fa un salto non fisico istantaneo, limita il movimento
         if dist > self.max_jump_px:
             clamp_factor = self.max_jump_px / max(1.0, dist)
-            curr_box = [
-                int(round(prev_box[0] + (curr_box[0] - prev_box[0]) * clamp_factor)),
-                int(round(prev_box[1] + (curr_box[1] - prev_box[1]) * clamp_factor)),
-                curr_box[2],
-                curr_box[3]
-            ]
-            eff_alpha = self.alpha
-        elif dist > 40:
-            # Movimento rapido (virata/spirale): aumenta reattività
-            eff_alpha = min(self.velocity_boost, self.alpha + (dist / 200.0) * (self.velocity_boost - self.alpha))
+            curr_cx = prev_cx + (curr_cx - prev_cx) * clamp_factor
+            curr_cy = prev_cy + (curr_cy - prev_cy) * clamp_factor
+            eff_alpha_pos = self.velocity_boost
+            eff_alpha_size = self.velocity_boost
+        elif dist >= self.velocity_threshold:
+            # Movimento rapido/dinamico (virata, spirale, chiusura, beccheggio):
+            eff_alpha_pos = self.velocity_boost
+            eff_alpha_size = min(self.velocity_boost, max(self.alpha_size, self.velocity_boost * 0.75))
+        elif dist > 3.0:
+            # Transizione fluida da smoothing fine a tracking reattivo
+            ratio = (dist - 3.0) / max(1.0, self.velocity_threshold - 3.0)
+            eff_alpha_pos = min(self.velocity_boost, self.alpha + ratio * (self.velocity_boost - self.alpha))
+            eff_alpha_size = self.alpha_size + ratio * (min(self.velocity_boost, 0.6) - self.alpha_size)
         else:
-            # Volo dritto o scorrimento lento: smoothing massimo per stabilizzare camera shake
-            eff_alpha = self.alpha
+            # Volo dritto o quasi immobile: micro-smoothing per stabilizzare jitter sub-pixel
+            eff_alpha_pos = self.alpha
+            eff_alpha_size = self.alpha_size
 
-        smoothed = []
-        for p, c in zip(prev_box, curr_box):
-            val = p * (1.0 - eff_alpha) + float(c) * eff_alpha
-            smoothed.append(val)
-        return smoothed
+        if eff_alpha_pos >= 1.0:
+            smooth_cx = float(curr_cx)
+            smooth_cy = float(curr_cy)
+        else:
+            smooth_cx = prev_cx * (1.0 - eff_alpha_pos) + float(curr_cx) * eff_alpha_pos
+            smooth_cy = prev_cy * (1.0 - eff_alpha_pos) + float(curr_cy) * eff_alpha_pos
+
+        if eff_alpha_size >= 1.0 or eff_alpha_pos >= 1.0:
+            smooth_w = float(curr_box[2])
+            smooth_h = float(curr_box[3])
+        else:
+            smooth_w = prev_box[2] * (1.0 - eff_alpha_size) + float(curr_box[2]) * eff_alpha_size
+            smooth_h = prev_box[3] * (1.0 - eff_alpha_size) + float(curr_box[3]) * eff_alpha_size
+
+        smooth_x = smooth_cx - smooth_w * 0.5
+        smooth_y = smooth_cy - smooth_h * 0.5
+
+        return [smooth_x, smooth_y, smooth_w, smooth_h]
 
     @staticmethod
     def interpolate_boxes_at(
@@ -145,8 +166,9 @@ class TrajectorySmoother:
         t: float
     ) -> Tuple[Optional[List[int]], Optional[List[int]]]:
         """
-        Dato un timestamp in secondi, trova i due campioni adiacenti
-        ed esegue un'interpolazione lineare continua.
+        Dato un timestamp in secondi, trova i campioni adiacenti e interpola con precisione continua sub-frame.
+        Se il timestamp coincide con un fotogramma campionato (entro 5ms, es. frame-stepping durante pausa),
+        aggancia direttamente il box esatto di quel frame.
         Ritorna: (pilot_box [x, y, w, h], wing_box [x, y, w, h])
         """
         if not trajectory:
@@ -179,6 +201,13 @@ class TrajectorySmoother:
         dt = s1["t"] - s0["t"]
         if dt <= 1e-4:
             return s0.get("pilot"), s0.get("wing")
+
+        # Snap esatto solo per micro-tolleranza di frame discreto (5 ms),
+        # per consentire una riproduzione fluida continua senza scatti a gradino
+        if abs(t - s0["t"]) <= 0.005:
+            return s0.get("pilot"), s0.get("wing")
+        if abs(t - s1["t"]) <= 0.005:
+            return s1.get("pilot"), s1.get("wing")
 
         factor = max(0.0, min(1.0, (t - s0["t"]) / dt))
 

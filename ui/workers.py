@@ -95,7 +95,7 @@ class AnalysisWorker(QThread):
 
             self.tracking_progress.emit(video_path, "Avvio tracciamento Pilota & Vela...", 10)
             from core.tracking.pipeline import VideoTrackingPipeline
-            pipeline = VideoTrackingPipeline(sample_interval=0.20)
+            pipeline = VideoTrackingPipeline(sample_interval=0.04)
 
             def on_track_prog(pct: int, msg: str):
                 if not self._is_cancelled:

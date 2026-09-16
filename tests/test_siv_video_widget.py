@@ -136,18 +136,15 @@ def test_siv_video_widget_set_bounding_boxes_force_repaint(qapp):
 def test_siv_video_widget_arrow_keys(qapp):
     widget = SIVVideoWidget()
     arrow_events = []
-    seek_events = []
 
     widget.arrow_nav_requested.connect(lambda d: arrow_events.append(d))
-    widget.seek_requested.connect(lambda ms: seek_events.append(ms))
 
     ev_left = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Left, Qt.KeyboardModifier.NoModifier)
     widget.keyPressEvent(ev_left)
     assert arrow_events == [-1]
-    assert seek_events == [-5000]
 
     ev_right = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier)
     widget.keyPressEvent(ev_right)
     assert arrow_events == [-1, 1]
-    assert seek_events == [-5000, 5000]
+
 

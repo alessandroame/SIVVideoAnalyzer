@@ -192,3 +192,40 @@ class SidecarData:
         from core.tracking.smoother import TrajectorySmoother
         return TrajectorySmoother.interpolate_boxes_at(tr["trajectory"], time_sec)
 
+    def add_tracking_keyframe(self, subject: str, t: float, box: List[int]) -> None:
+        """Aggiunge o aggiorna un keyframe per pilota o vela, ricalcola la traiettoria e salva il sidecar."""
+        tr = self.data.get("tracking")
+        if not tr or not tr.get("trajectory"):
+            return
+        from core.tracking.keyframe_manager import KeyframeManager
+        KeyframeManager.add_keyframe(tr, subject, t, box)
+        self.save()
+
+    def remove_tracking_keyframe(self, subject: str, t: float, tolerance: float = 0.35) -> bool:
+        """Rimuove il keyframe al timestamp specificato, ricalcola la traiettoria e salva il sidecar."""
+        tr = self.data.get("tracking")
+        if not tr or not tr.get("trajectory"):
+            return False
+        from core.tracking.keyframe_manager import KeyframeManager
+        removed = KeyframeManager.remove_keyframe(tr, subject, t, tolerance=tolerance)
+        if removed:
+            self.save()
+        return removed
+
+    def reset_tracking_keyframes(self) -> None:
+        """Ripristina la traiettoria originale AI rimuovendo tutti i ritocchi manuali."""
+        tr = self.data.get("tracking")
+        if not tr or not tr.get("trajectory"):
+            return
+        from core.tracking.keyframe_manager import KeyframeManager
+        KeyframeManager.reset_keyframes(tr)
+        self.save()
+
+    def get_tracking_keyframes(self, subject: Optional[str] = None) -> Any:
+        """Restituisce i keyframe manuali del tracciamento."""
+        tr = self.data.get("tracking")
+        if not tr:
+            return [] if subject else {"pilot": [], "wing": []}
+        from core.tracking.keyframe_manager import KeyframeManager
+        return KeyframeManager.get_keyframes(tr, subject=subject)
+

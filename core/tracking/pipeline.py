@@ -11,18 +11,19 @@ from core.tracking.smoother import TrajectorySmoother
 class VideoTrackingPipeline:
     """
     Pipeline di analisi video ad alta precisione per il tracciamento di Pilota e Vela.
-    Elabora la clip video a 5 fps (step 0.20s), applica blob detection e vincoli pendolari,
-    e produce la traiettoria stabilizzata salvata nel sidecar .json.
+    Elabora la clip video ad alta frequenza (predefinito 0.04s / 25 fps, fotogramma per fotogramma),
+    applica blob detection adattiva e vincoli pendolari SIV, e produce la traiettoria
+    stabilizzata e reattiva salvata nel sidecar .json.
     """
     def __init__(
         self,
-        sample_interval: float = 0.20,
+        sample_interval: float = 0.04,
         onnx_model_path: Optional[str] = None
     ):
         self.sample_interval = sample_interval
         self.wing_tracker = WingTracker(padding_ratio=0.12)
         self.pilot_tracker = PilotTracker(onnx_model_path=onnx_model_path)
-        self.smoother = TrajectorySmoother(alpha=0.30, velocity_boost=0.70)
+        self.smoother = TrajectorySmoother(alpha=0.35, alpha_size=0.25, velocity_boost=0.85, velocity_threshold=20.0)
 
     def process_video(
         self,
@@ -62,7 +63,11 @@ class VideoTrackingPipeline:
 
         # Parametri video
         fps = float(stream.average_rate) if stream.average_rate else 25.0
-        frame_step = max(1, int(round(fps * self.sample_interval)))
+        if self.sample_interval <= 0.04:
+            # Modalità aggressiva fotogramma per fotogramma per framerate standard (24-32 fps)
+            frame_step = 1 if fps <= 32.0 else max(1, int(round(fps * self.sample_interval)))
+        else:
+            frame_step = max(1, int(round(fps * self.sample_interval)))
         width = stream.width
         height = stream.height
 

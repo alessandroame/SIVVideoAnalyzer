@@ -10,6 +10,7 @@ class SIVTimelineSlider(QSlider):
     seek_requested = pyqtSignal(int)      # Emette il timestamp in millisecondi per il player
     drag_started = pyqtSignal()
     drag_ended = pyqtSignal()
+    keyframe_delete_requested = pyqtSignal(str, float)  # (subject 'pilot'|'wing', t_sec)
 
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
@@ -18,8 +19,10 @@ class SIVTimelineSlider(QSlider):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._chapters = []
+        self._keyframes = {"pilot": [], "wing": []}
         self.is_dragging = False
         self._hovered_chapter = None
+        self._hovered_keyframe = None
         self._target_seek_val = 0
 
         # Timer di throttling a 25 ms (~40 fps) per non sovraccaricare il decoder WMF durante il drag
@@ -31,6 +34,11 @@ class SIVTimelineSlider(QSlider):
     def set_chapters(self, chapters: list):
         """Imposta la lista dei capitoli/manovre [{'start': s, 'end': s, 'title': str}]."""
         self._chapters = chapters if chapters else []
+        self.update()
+
+    def set_keyframes(self, keyframes: dict):
+        """Imposta i keyframe di tracciamento {'pilot': [...], 'wing': [...]}."""
+        self._keyframes = keyframes if isinstance(keyframes, dict) else {"pilot": [], "wing": []}
         self.update()
 
     def _on_throttle_timeout(self):
@@ -78,15 +86,59 @@ class SIVTimelineSlider(QSlider):
                 best_ch = ch
         return best_ch
 
+    def _find_keyframe_near_pos(self, x: int, tolerance: int = 12):
+        track = self._get_track_rect()
+        rng = self.maximum() - self.minimum()
+        if rng <= 0:
+            return None
+
+        best_kf = None
+        best_dist = 9999
+        for subject in ["pilot", "wing"]:
+            for kf in self._keyframes.get(subject, []):
+                try:
+                    t_ms = int(float(kf.get("t", 0.0)) * 1000)
+                except (ValueError, TypeError):
+                    continue
+                kf_x = self._val_to_x(t_ms, track)
+                dist = abs(kf_x - x)
+                if dist <= tolerance and dist < best_dist:
+                    best_dist = dist
+                    best_kf = (subject, kf)
+        return best_kf
+
     def mousePressEvent(self, event: QMouseEvent):
+        track = self._get_track_rect()
+        x = event.pos().x()
+
+        if event.button() == Qt.MouseButton.RightButton:
+            # Clic con il tasto destro del mouse: elimina direttamente il keyframe
+            near_kf = self._find_keyframe_near_pos(x, tolerance=12)
+            if near_kf:
+                subj, kf = near_kf
+                t_s = float(kf.get("t", 0.0))
+                self.keyframe_delete_requested.emit(subj, t_s)
+                lbl = "Pilota" if subj == "pilot" else "Vela"
+                QToolTip.showText(
+                    event.globalPosition().toPoint(),
+                    f"🗑 <b>Keyframe {lbl} eliminato</b>",
+                    self
+                )
+                self.update()
+                event.accept()
+                return
+            super().mousePressEvent(event)
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = True
-            track = self._get_track_rect()
-            x = event.pos().x()
 
-            # Se si clicca in prossimità di un marker, aggancia (snap) esattamente all'inizio della manovra
+            # Se si clicca in prossimità di un keyframe o di un capitolo, aggancia (snap)
+            near_kf = self._find_keyframe_near_pos(x, tolerance=12)
             near_ch = self._find_chapter_near_pos(x, tolerance=8)
-            if near_ch:
+            if near_kf:
+                val = int(near_kf[1].get("t", 0.0) * 1000)
+            elif near_ch:
                 val = int(near_ch.get("start", 0) * 1000)
             else:
                 val = self._pos_to_val(x)
@@ -116,8 +168,13 @@ class SIVTimelineSlider(QSlider):
             # Tooltip con minutaggio corrente durante il trascinamento
             dur_s = self.maximum() // 1000
             curr_s = val // 1000
+            near_kf = self._find_keyframe_near_pos(x, tolerance=12)
             near_ch = self._find_chapter_near_pos(x, tolerance=8)
-            if near_ch:
+            if near_kf:
+                subj, kf = near_kf
+                lbl = "Pilota" if subj == "pilot" else "Vela"
+                t_str = f"◆ {curr_s//60:02d}:{curr_s%60:02d} - Keyframe {lbl}"
+            elif near_ch:
                 t_str = f"🎯 {curr_s//60:02d}:{curr_s%60:02d} - {near_ch.get('title', '')}"
             else:
                 t_str = f"⏱ {curr_s//60:02d}:{curr_s%60:02d} / {dur_s//60:02d}:{dur_s%60:02d}"
@@ -126,13 +183,26 @@ class SIVTimelineSlider(QSlider):
             self.update()
             event.accept()
         else:
-            # Hovering senza drag: controllo se si passa su un marker manovra
+            # Hovering senza drag: controllo se si passa su un keyframe o su un marker manovra
+            near_kf = self._find_keyframe_near_pos(x, tolerance=10)
             near_ch = self._find_chapter_near_pos(x, tolerance=7)
-            if near_ch != self._hovered_chapter:
+            if near_kf != self._hovered_keyframe or near_ch != self._hovered_chapter:
+                self._hovered_keyframe = near_kf
                 self._hovered_chapter = near_ch
                 self.update()
 
-            if near_ch:
+            if near_kf:
+                subj, kf = near_kf
+                t_s = float(kf.get("t", 0.0))
+                lbl = "Pilota" if subj == "pilot" else "Vela"
+                time_str = f"{int(t_s)//60:02d}:{t_s%60:04.1f}"
+                QToolTip.showText(
+                    event.globalPosition().toPoint(),
+                    f"◆ <b>Keyframe {lbl}</b> ({time_str})<br><span style='color:#94a3b8; font-size:10px;'>Clicca col tasto destro per eliminare</span>",
+                    self
+                )
+
+            elif near_ch:
                 st_s = int(near_ch.get("start", 0))
                 time_str = f"{st_s//60:02d}:{st_s%60:02d}"
                 title = near_ch.get("title", "Manovra")
@@ -225,7 +295,31 @@ class SIVTimelineSlider(QSlider):
             painter.setBrush(QBrush(tick_color))
             painter.drawPolygon(pin)
 
-        # 4. Indicatore di scorrimento (Thumb / Cursore)
+        # 4. Marker Keyframe di Tracciamento (Diamanti ◆)
+        for subject, color_hex in [("wing", "#f59e0b"), ("pilot", "#06b6d4")]:
+            for kf in self._keyframes.get(subject, []):
+                try:
+                    kf_ms = int(float(kf.get("t", 0.0)) * 1000)
+                except (ValueError, TypeError):
+                    continue
+                kf_x = self._val_to_x(kf_ms, track)
+                if kf_x < track.left() or kf_x > track.right():
+                    continue
+
+                is_kf_hovered = (self._hovered_keyframe and self._hovered_keyframe[1] == kf)
+                d_size = 6 if is_kf_hovered else 4.5
+
+                diamond = QPolygon([
+                    QPoint(kf_x, int(track_center_y - d_size)),
+                    QPoint(int(kf_x + d_size), int(track_center_y)),
+                    QPoint(kf_x, int(track_center_y + d_size)),
+                    QPoint(int(kf_x - d_size), int(track_center_y))
+                ])
+                painter.setPen(QPen(QColor("#0f172a"), 1.2))
+                painter.setBrush(QBrush(QColor(color_hex)))
+                painter.drawPolygon(diamond)
+
+        # 5. Indicatore di scorrimento (Thumb / Cursore)
         thumb_r = 7 if not self.is_dragging else 8
         thumb_cy = track.center().y()
 

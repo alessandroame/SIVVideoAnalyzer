@@ -165,3 +165,105 @@ def test_pipeline_on_real_sample_video():
     first_w = valid_wings[0]["wing"]
     assert first_w[2] > 30 and first_w[3] > 20
 
+
+def test_trajectory_smoother_aggressive_on_sudden_motion():
+    smoother = TrajectorySmoother(velocity_threshold=12.0, velocity_boost=1.0)
+
+    # Frame 0: pilota a (100, 200)
+    # Frame 1: salto improvviso a (160, 240) (movimento repentino di 72px)
+    raw = [
+        {"t": 0.00, "pilot": [100, 200, 50, 70], "wing": [80, 50, 120, 80]},
+        {"t": 0.04, "pilot": [160, 240, 50, 70], "wing": [140, 90, 120, 80]}
+    ]
+
+    smoothed = smoother.smooth_trajectory(raw)
+    assert len(smoothed) == 2
+    # Con tracking aggressivo (eff_alpha = 1.0), il box scatta istantaneamente al target senza ritardo
+    assert smoothed[1]["pilot"] == [160, 240, 50, 70]
+
+
+def test_interpolate_boxes_at_frame_snap():
+    trajectory = [
+        {"t": 0.00, "pilot": [100, 200, 50, 70], "wing": [80, 50, 120, 80]},
+        {"t": 0.04, "pilot": [115, 205, 50, 70], "wing": [95, 55, 120, 80]},
+        {"t": 0.08, "pilot": [130, 210, 50, 70], "wing": [110, 60, 120, 80]},
+    ]
+
+    # Timestamp molto vicino al secondo frame (0.041s rispetto a 0.04s): snap al fotogramma esatto
+    p_box, w_box = TrajectorySmoother.interpolate_boxes_at(trajectory, 0.041)
+    assert p_box == [115, 205, 50, 70]
+
+    # Timestamp intermedio (0.06s): interpolazione coerente
+    p_box_mid, _ = TrajectorySmoother.interpolate_boxes_at(trajectory, 0.06)
+    assert p_box_mid is not None
+    assert 115 <= p_box_mid[0] <= 130
+
+
+def test_pilot_tracker_off_axis_swing():
+    pilot_tracker = PilotTracker()
+    frame = np.full((600, 600, 3), [140, 180, 220], dtype=np.uint8)
+
+    # Vela inclinata / sbandata a sinistra
+    wing_box = WingBox(x=150, y=50, w=150, h=80, confidence=0.85, pixel_count=2500)
+
+    # Pilota sbandato fortemente a destra (fuori dal vecchio asse pendolare stretto, es. x=310, y=220)
+    frame[210:240, 300:325] = [25, 25, 30]
+
+    p_box = pilot_tracker.detect(frame, wing_box=wing_box)
+    assert p_box is not None
+    assert isinstance(p_box, PilotBox)
+    # Deve rilevare il pilota sbandato senza fallire
+    assert p_box.center_x > wing_box.center_x + 30
+
+
+def test_dark_core_and_anatomical_box():
+    pilot_tracker = PilotTracker()
+    # Sfondo cielo/lago realistico a luminanza ~110
+    frame = np.full((500, 500, 3), [110, 110, 110], dtype=np.uint8)
+
+    # Vela a x=200, y=50, w=120, h=80
+    wing_box = WingBox(x=200, y=50, w=120, h=80, confidence=0.85, pixel_count=3000)
+
+    # Inserisci disturbo chiaro (riflesso sole / onda bianca / nuvola) a luminanza 190
+    frame[160:190, 230:260] = [190, 190, 190]
+
+    # Inserisci nucleo scuro del pilota (imbrago nero/antracite) a y=200, x=245..265
+    frame[195:215, 245:265] = [35, 38, 42]
+
+    p_box = pilot_tracker.detect(frame, wing_box=wing_box)
+    assert p_box is not None
+    assert isinstance(p_box, PilotBox)
+
+    # Il tracker DEVE ignorare il riflesso chiaro a 190 e agganciare il Dark Core a 35!
+    assert 220 <= p_box.center_x <= 280
+    assert 160 <= p_box.center_y <= 240
+
+    # Verifica vincolo anatomico per braccia e gambe:
+    # Rapporto altezza / larghezza tra 1.20 e 1.60
+    aspect_ratio = p_box.h / p_box.w
+    assert 1.20 <= aspect_ratio <= 1.60
+
+    # Verifica che il box si estenda sufficientemente verso l'alto (braccia/comandi)
+    # e verso il basso (gambe/scarponi) attorno al centroide scuro (y~205)
+    assert p_box.y < 205  # braccia sopra
+    assert p_box.y + p_box.h > 215  # gambe sotto
+
+
+def test_trajectory_smoother_dimension_stabilization():
+    smoother = TrajectorySmoother(alpha=0.35, alpha_size=0.25, velocity_boost=0.85, velocity_threshold=20.0)
+
+    # Simula micro-jitter nelle dimensioni rilevate (breathing del contorno)
+    raw = [
+        {"t": 0.00, "pilot": [100, 200, 50, 70], "wing": [80, 50, 120, 80]},
+        {"t": 0.04, "pilot": [102, 201, 56, 76], "wing": [82, 51, 126, 84]},  # scatto di +6px in w, h
+        {"t": 0.08, "pilot": [103, 202, 48, 68], "wing": [83, 52, 118, 78]}   # scatto di -8px in w, h
+    ]
+
+    smoothed = smoother.smooth_trajectory(raw)
+    assert len(smoothed) == 3
+
+    # Il frame 1 non deve saltare a w=56, h=76, ma deve essere stabilizzato dolcemente
+    p1 = smoothed[1]["pilot"]
+    assert p1 is not None
+    assert 51 <= p1[2] <= 53  # larghezza stabilizzata
+    assert 71 <= p1[3] <= 73  # altezza stabilizzata
