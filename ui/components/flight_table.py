@@ -77,6 +77,10 @@ class FlightTableWidget(QWidget):
         self.lbl_badge_man.setStyleSheet("background-color: #1e293b; color: #a855f7; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
         top.addWidget(self.lbl_badge_man)
 
+        self.lbl_badge_track = QLabel("📍 Tracking: 0/0")
+        self.lbl_badge_track.setStyleSheet("background-color: #1e293b; color: #06b6d4; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+        top.addWidget(self.lbl_badge_track)
+
         self.lbl_worker_status = QLabel("")
         self.lbl_worker_status.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 12px; margin-left: 6px;")
         top.addWidget(self.lbl_worker_status)
@@ -182,11 +186,19 @@ class FlightTableWidget(QWidget):
         self.pilot_gliders = dict(gliders)
         self.table_flights.setRowCount(0)
 
-    def update_phases_status(self, audio_done: int, wing_done: int, man_done: int, total_clips: int):
+    def update_phases_status(self, audio_done: int, wing_done: int, man_done: int, arg4: int, arg5: int = None):
+        if arg5 is None:
+            total_clips = arg4
+            track_done = 0
+        else:
+            track_done = arg4
+            total_clips = arg5
+
         tot = max(1, total_clips)
         a_col = "#10b981" if audio_done >= tot else "#38bdf8"
         w_col = "#10b981" if wing_done >= tot else "#eab308"
         m_col = "#10b981" if man_done >= tot else "#a855f7"
+        t_col = "#10b981" if track_done >= tot else "#06b6d4"
 
         self.lbl_badge_audio.setText(f"🎙️ Audio: {audio_done}/{tot}")
         self.lbl_badge_audio.setStyleSheet(f"background-color: #1e293b; color: {a_col}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
@@ -196,6 +208,9 @@ class FlightTableWidget(QWidget):
 
         self.lbl_badge_man.setText(f"🎯 Manovre: {man_done}/{tot}")
         self.lbl_badge_man.setStyleSheet(f"background-color: #1e293b; color: {m_col}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
+
+        self.lbl_badge_track.setText(f"📍 Tracking: {track_done}/{tot}")
+        self.lbl_badge_track.setStyleSheet(f"background-color: #1e293b; color: {t_col}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;")
 
     def set_worker_status(self, text: str):
         self.lbl_worker_status.setText(text)

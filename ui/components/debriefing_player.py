@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QHeaderView, QSlider, QFrame, QSplitter, QProgressBar
 )
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QImage
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
@@ -15,7 +16,9 @@ from ui.transcription_inspector_dialog import TranscriptionInspectorDialog
 from ui.wing_color_inspector_dialog import WingColorInspectorDialog
 from ui.components.tracking_panel import TrackingPanelWidget
 from ui.components.siv_video_widget import SIVVideoWidget
+from ui.components.timeline_slider import SIVTimelineSlider
 from ui.tracking_worker import TrackingWorker
+from ui.scrub_worker import ScrubWorker
 
 
 class DebriefingPlayerWidget(QWidget):
@@ -29,6 +32,10 @@ class DebriefingPlayerWidget(QWidget):
         self.maneuver_detector = maneuver_detector
         self.current_video_path = None
         self.current_sidecar = None
+        self._scrub_worker = None
+        self._was_playing_before_drag = False
+        self._fps: float = 25.0
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._init_ui()
 
     def _init_ui(self):
@@ -102,9 +109,10 @@ class DebriefingPlayerWidget(QWidget):
         self.video_widget.escape_pressed.connect(self.handle_escape)
         self.video_widget.toggle_fullscreen_requested.connect(self.toggle_fullscreen)
         self.video_widget.toggle_play_requested.connect(self.toggle_play)
-        self.video_widget.seek_requested.connect(self.seek)
+        self.video_widget.arrow_nav_requested.connect(self.handle_arrow_nav)
         self.video_widget.toggle_tracking_requested.connect(self.toggle_tracking)
-        self.media_player.setVideoOutput(self.video_widget)
+        self.video_widget.toggle_boxes_requested.connect(self.toggle_bounding_boxes)
+        self.media_player.setVideoOutput(self.video_widget.videoSink())
 
         # Splitter orizzontale: Video Principale + Pannello Tracciamento Vela e Pilota
         self.video_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -113,7 +121,7 @@ class DebriefingPlayerWidget(QWidget):
         # Pannello dedicato al tracciamento zoomato di Vela e Pilota
         self.tracking_panel = TrackingPanelWidget()
         self.video_sink = self.video_widget.videoSink()
-        self.video_sink.videoFrameChanged.connect(self._on_video_frame)
+        self.video_widget.frame_decoded.connect(self._on_frame_decoded)
 
         self.video_splitter.addWidget(self.video_widget)
         self.video_splitter.addWidget(self.tracking_panel)
@@ -122,6 +130,14 @@ class DebriefingPlayerWidget(QWidget):
         self.video_splitter.setSizes([740, 310])
 
         v_layout.addWidget(self.video_splitter, stretch=1)
+
+        # Timeline Slider a tutta larghezza con marker capitoli & manovre
+        self.slider = SIVTimelineSlider()
+        self.slider.seek_requested.connect(self._on_seek_requested)
+        self.slider.valueChanged.connect(self._on_slider_value_changed)
+        self.slider.drag_started.connect(self._on_drag_started)
+        self.slider.drag_ended.connect(self._on_drag_ended)
+        v_layout.addWidget(self.slider)
 
         # Controlli playback
         ctrl_bar = QHBoxLayout()
@@ -147,10 +163,6 @@ class DebriefingPlayerWidget(QWidget):
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setStyleSheet("font-weight: 700; font-size: 13px; color: #94a3b8; min-width: 95px;")
         ctrl_bar.addWidget(self.lbl_time)
-
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.sliderMoved.connect(self.media_player.setPosition)
-        ctrl_bar.addWidget(self.slider)
 
         btn_seek_b = QPushButton("⏪ -5s")
         btn_seek_b.setStyleSheet("""
@@ -180,6 +192,8 @@ class DebriefingPlayerWidget(QWidget):
         btn_seek_f.clicked.connect(lambda: self.seek(5000))
         ctrl_bar.addWidget(btn_seek_f)
 
+        ctrl_bar.addSpacing(6)
+
         self.btn_tracking = QPushButton("🎯 Tracking (T)")
         self.btn_tracking.setStyleSheet("""
             QPushButton {
@@ -195,6 +209,24 @@ class DebriefingPlayerWidget(QWidget):
         self.btn_tracking.setToolTip("Mostra/nasconde i due riquadri di tracciamento di Pilota e Vela (Scorciatoia: T)")
         self.btn_tracking.clicked.connect(self.toggle_tracking)
         ctrl_bar.addWidget(self.btn_tracking)
+
+        self.btn_boxes = QPushButton("🔲 Riquadri ON (B)")
+        self.btn_boxes.setStyleSheet("""
+            QPushButton {
+                padding: 8px 14px;
+                font-weight: 700;
+                background-color: #0f766e;
+                color: #ffffff;
+                border: 1px solid #2dd4bf;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #0d9488; }
+        """)
+        self.btn_boxes.setToolTip("Mostra/nasconde i riquadri di Pilota e Vela sul video principale (Scorciatoia: B)")
+        self.btn_boxes.clicked.connect(self.toggle_bounding_boxes)
+        ctrl_bar.addWidget(self.btn_boxes)
+
+        ctrl_bar.addStretch()
 
         self.btn_fullscreen = QPushButton("⛶ Schermo Intero (F)")
         self.btn_fullscreen.setStyleSheet("""
@@ -377,12 +409,37 @@ class DebriefingPlayerWidget(QWidget):
         self.lbl_flight_title.setText(f"{pilot}{fl} ({os.path.basename(video_path)})")
 
         self.tracking_panel.set_sidecar(self.current_sidecar)
+
+        if self._scrub_worker:
+            self._scrub_worker.stop()
+            self._scrub_worker = None
+        self._scrub_worker = ScrubWorker(video_path, parent=self)
+        self._scrub_worker.frame_ready.connect(self._on_scrub_frame)
+        self._scrub_worker.start()
+
+        # Inizializza duration iniziale da OpenCV per reattività istantanea dello scrubber
+        try:
+            import cv2
+            cap_tmp = cv2.VideoCapture(video_path)
+            if cap_tmp.isOpened():
+                fps = cap_tmp.get(cv2.CAP_PROP_FPS)
+                if fps and fps > 1.0:
+                    self._fps = float(fps)
+                fc = cap_tmp.get(cv2.CAP_PROP_FRAME_COUNT)
+                if fps > 0 and fc > 0:
+                    dur_ms = int((fc / fps) * 1000)
+                    self.slider.setRange(0, dur_ms)
+                cap_tmp.release()
+        except Exception:
+            pass
+
         if self.current_sidecar.has_tracking():
             self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
         else:
             self.btn_calc_tracking.setText("⏳ Calcolo Tracciamento (PiP)...")
-            self.tracking_panel.set_status_all("Calcolo automatico in corso...")
-            self._on_calc_tracking_clicked()
+            self.tracking_panel.set_status_all("Calcolo in corso...")
+            if not (hasattr(self, "tracking_worker") and self.tracking_worker and self.tracking_worker.isRunning()):
+                self._on_calc_tracking_clicked()
 
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.media_player.play()
@@ -406,8 +463,10 @@ class DebriefingPlayerWidget(QWidget):
     def refresh_chapters_table(self):
         self.table_chapters.setRowCount(0)
         if not self.current_sidecar:
+            self.slider.set_chapters([])
             return
         chaps = self.current_sidecar.chapters
+        self.slider.set_chapters(chaps)
         self.table_chapters.setRowCount(len(chaps))
         for r, ch in enumerate(chaps):
             start_s = int(ch.get("start", 0))
@@ -422,7 +481,10 @@ class DebriefingPlayerWidget(QWidget):
             return
         ch = self.current_sidecar.chapters[row]
         start_ms = int(ch.get("start", 0) * 1000)
+        self.slider.setValue(start_ms)
         self.media_player.setPosition(start_ms)
+        if self._scrub_worker:
+            self._scrub_worker.request_frame(start_ms)
         self.media_player.play()
         self.btn_play.setText("⏸ Pausa")
 
@@ -474,8 +536,48 @@ class DebriefingPlayerWidget(QWidget):
                 self.refresh_chapters_table()
 
     def _on_back_clicked(self):
+        if self._scrub_worker:
+            self._scrub_worker.stop()
+            self._scrub_worker = None
         self.media_player.pause()
         self.back_to_table_requested.emit()
+
+    def _on_drag_started(self):
+        self.video_widget.set_scrubbing(True)
+        self._was_playing_before_drag = (self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+        if self._was_playing_before_drag:
+            self.media_player.pause()
+
+    def _on_drag_ended(self):
+        self.video_widget.set_scrubbing(False)
+        final_pos = self.slider.value()
+        self.media_player.setPosition(final_pos)
+        if self._scrub_worker:
+            self._scrub_worker.request_frame(final_pos)
+        if self._was_playing_before_drag:
+            self.media_player.play()
+            self.btn_play.setText("⏸ Pausa")
+
+    def _on_seek_requested(self, pos_ms: int):
+        self.media_player.setPosition(pos_ms)
+        if self._scrub_worker:
+            self._scrub_worker.request_frame(pos_ms)
+
+    def _on_scrub_frame(self, qimg, curr_s: float):
+        # Mostra immediatamente il frame sul video widget principale
+        self.video_widget.display_image(qimg)
+
+        # Aggiorna i riquadri di tracking sul video principale
+        if self.current_sidecar and self.current_sidecar.has_tracking():
+            p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_s)
+            self.video_widget.set_bounding_boxes(p_box, w_box, force_repaint=True)
+        else:
+            self.video_widget.set_bounding_boxes(None, None, force_repaint=True)
+
+        # Aggiorna le due viste PiP di Vela e Pilota con frame deinterlacciato
+        if self.current_sidecar and self.tracking_panel.isVisible():
+            frame_to_use = self.video_widget._current_frame or qimg
+            self.tracking_panel.handle_qimage_frame(frame_to_use, curr_s, force=True)
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -486,8 +588,41 @@ class DebriefingPlayerWidget(QWidget):
             self.btn_play.setText("⏸ Pausa")
 
     def seek(self, offset_ms: int):
-        new_pos = max(0, min(self.media_player.position() + offset_ms, self.media_player.duration()))
+        dur = self.media_player.duration()
+        target = self.media_player.position() + offset_ms
+        if dur > 0:
+            target = min(target, dur)
+        new_pos = max(0, target)
+        self.slider.setValue(new_pos)
         self.media_player.setPosition(new_pos)
+        if self._scrub_worker:
+            self._scrub_worker.request_frame(new_pos)
+
+    def handle_arrow_nav(self, direction: int):
+        """
+        Gestisce i tasti freccia sinistra (-1) e destra (+1):
+        - In PLAY: sposta di 5 secondi (+/- 5000 ms).
+        - In PAUSA: muove di esattamente 1 fotogramma (calcolato dagli fps effettivi del video).
+        """
+        is_playing = (self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState)
+        if is_playing:
+            self.seek(direction * 5000)
+        else:
+            self.step_frame(direction)
+
+    def step_frame(self, direction: int):
+        """Avanza o retrocede di esattamente 1 singolo fotogramma."""
+        fps = getattr(self, "_fps", 25.0) or 25.0
+        frame_ms = max(1, int(round(1000.0 / fps)))
+        dur = self.media_player.duration()
+        target = self.media_player.position() + direction * frame_ms
+        if dur > 0:
+            target = min(target, dur)
+        new_pos = max(0, target)
+        self.slider.setValue(new_pos)
+        self.media_player.setPosition(new_pos)
+        if self._scrub_worker:
+            self._scrub_worker.request_frame(new_pos)
 
     def toggle_fullscreen(self):
         if self.video_widget.isFullScreen():
@@ -511,10 +646,18 @@ class DebriefingPlayerWidget(QWidget):
             self.btn_fullscreen.setText("⛶ Schermo Intero (F)")
 
     def _on_player_pos_changed(self, pos_ms: int):
-        self.slider.setValue(pos_ms)
+        if not self.slider.is_dragging:
+            self.slider.setValue(pos_ms)
+            pos_s = pos_ms // 1000
+            dur_s = self.media_player.duration() // 1000
+            self.lbl_time.setText(f"{pos_s//60:02d}:{pos_s%60:02d} / {dur_s//60:02d}:{dur_s%60:02d}")
+
+    def _on_slider_value_changed(self, pos_ms: int):
         pos_s = pos_ms // 1000
         dur_s = self.media_player.duration() // 1000
         self.lbl_time.setText(f"{pos_s//60:02d}:{pos_s%60:02d} / {dur_s//60:02d}:{dur_s%60:02d}")
+        if self.slider.is_dragging and self._scrub_worker:
+            self._scrub_worker.request_frame(pos_ms)
 
     def pause(self):
         self.media_player.pause()
@@ -557,10 +700,87 @@ class DebriefingPlayerWidget(QWidget):
                 QPushButton:hover { background-color: #1c263d; border-color: #38bdf8; }
             """)
 
-    def _on_video_frame(self, frame):
+    def toggle_bounding_boxes(self):
+        new_state = self.video_widget.toggle_bounding_boxes()
+        if new_state:
+            self.btn_boxes.setText("🔲 Riquadri ON (B)")
+            self.btn_boxes.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 14px;
+                    font-weight: 700;
+                    background-color: #0f766e;
+                    color: #ffffff;
+                    border: 1px solid #2dd4bf;
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background-color: #0d9488; }
+            """)
+        else:
+            self.btn_boxes.setText("🔲 Riquadri OFF (B)")
+            self.btn_boxes.setStyleSheet("""
+                QPushButton {
+                    padding: 8px 14px;
+                    font-weight: 600;
+                    background-color: #131b2e;
+                    color: #94a3b8;
+                    border: 1px solid #23314f;
+                    border-radius: 8px;
+                }
+                QPushButton:hover { background-color: #1c263d; border-color: #38bdf8; }
+            """)
+
+    def _on_frame_decoded(self, qimg: QImage):
+        if self.slider.is_dragging:
+            return
+
+        curr_s = self.media_player.position() / 1000.0
+
+        # Aggiorna i riquadri di Pilota e Vela sul video principale (senza repaint ridondante)
+        if self.current_sidecar and self.current_sidecar.has_tracking():
+            p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_s)
+            self.video_widget.set_bounding_boxes(p_box, w_box, force_repaint=False)
+        else:
+            self.video_widget.set_bounding_boxes(None, None, force_repaint=False)
+
+        # Aggiorna i due visualizzatori PiP se il pannello laterale è visibile (throttled a ~25 fps)
         if self.current_sidecar and self.tracking_panel.isVisible():
-            curr_s = self.media_player.position() / 1000.0
-            self.tracking_panel.handle_video_frame(frame, curr_s)
+            self.tracking_panel.handle_qimage_frame(qimg, curr_s, force=False)
+
+    def _on_video_frame(self, frame):
+        """Metodo di compatibilità: riceve QVideoFrame e inoltra a _on_frame_decoded."""
+        if not frame.isValid():
+            return
+        self._on_frame_decoded(frame.toImage())
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_B:
+            self.toggle_bounding_boxes()
+            event.accept()
+        elif key == Qt.Key.Key_T:
+            self.toggle_tracking()
+            event.accept()
+        elif key == Qt.Key.Key_Space:
+            self.toggle_play()
+            event.accept()
+        elif key == Qt.Key.Key_Left:
+            self.handle_arrow_nav(-1)
+            event.accept()
+        elif key == Qt.Key.Key_Right:
+            self.handle_arrow_nav(1)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def update_tracking(self, video_path: str, tracking_dict: dict):
+        """Riceve l'esito del tracciamento calcolato in background."""
+        if self.current_video_path == video_path:
+            self._on_tracking_finished(video_path, tracking_dict)
+
+    def set_tracking_progress(self, video_path: str, status_text: str, percent: int):
+        """Riceve l'avanzamento del tracciamento calcolato in background."""
+        if self.current_video_path == video_path:
+            self.set_maneuver_progress(video_path, f"Tracking: {status_text}", percent)
 
     def _on_calc_tracking_clicked(self):
         if not self.current_video_path:

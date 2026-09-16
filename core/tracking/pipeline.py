@@ -10,19 +10,19 @@ from core.tracking.smoother import TrajectorySmoother
 
 class VideoTrackingPipeline:
     """
-    Pipeline di analisi video per il tracciamento di Pilota e Vela.
-    Elabora la clip con PyAV a step temporali regolari e produce
-    la traiettoria stabilizzata da salvare nel file sidecar .json.
+    Pipeline di analisi video ad alta precisione per il tracciamento di Pilota e Vela.
+    Elabora la clip video a 5 fps (step 0.20s), applica blob detection e vincoli pendolari,
+    e produce la traiettoria stabilizzata salvata nel sidecar .json.
     """
     def __init__(
         self,
-        sample_interval: float = 0.35,
+        sample_interval: float = 0.20,
         onnx_model_path: Optional[str] = None
     ):
         self.sample_interval = sample_interval
-        self.wing_tracker = WingTracker(padding_ratio=0.15)
+        self.wing_tracker = WingTracker(padding_ratio=0.12)
         self.pilot_tracker = PilotTracker(onnx_model_path=onnx_model_path)
-        self.smoother = TrajectorySmoother(alpha=0.35, velocity_boost=0.65)
+        self.smoother = TrajectorySmoother(alpha=0.30, velocity_boost=0.70)
 
     def process_video(
         self,
@@ -47,6 +47,19 @@ class VideoTrackingPipeline:
                 progress_callback(0, f"Errore apertura video: {e}")
             return None
 
+        # Prova a leggere i colori della vela dal sidecar per raffinare la rilevazione
+        try:
+            from core.sidecar_manager import SidecarData
+            sidecar = SidecarData(video_path)
+            if sidecar.glider:
+                # Esempio: "Ozone Rush - Rosso / Bianco"
+                parts = sidecar.glider.replace("-", ",").replace("/", ",").split(",")
+                colors = [p.strip() for p in parts if p.strip()]
+                if colors:
+                    self.wing_tracker.set_target_colors(colors)
+        except Exception:
+            pass
+
         # Parametri video
         fps = float(stream.average_rate) if stream.average_rate else 25.0
         frame_step = max(1, int(round(fps * self.sample_interval)))
@@ -67,7 +80,7 @@ class VideoTrackingPipeline:
         last_wing: Optional[WingBox] = None
 
         if progress_callback:
-            progress_callback(5, "Avvio scansione video...")
+            progress_callback(5, "Avvio scansione video ad alta precisione...")
 
         frame_idx = 0
         last_progress_emit = time.time()
@@ -82,12 +95,12 @@ class VideoTrackingPipeline:
                 # Estrai array RGB uint8
                 img_rgb = frame.to_ndarray(format="rgb24")
 
-                # 1. Rileva Vela
-                wing_box = self.wing_tracker.detect(img_rgb)
+                # 1. Rileva Vela con memoria temporale
+                wing_box = self.wing_tracker.detect(img_rgb, last_wing_box=last_wing)
                 if wing_box:
                     last_wing = wing_box
 
-                # 2. Rileva Pilota
+                # 2. Rileva Pilota nel cono pendolare sotto la vela
                 pilot_box = self.pilot_tracker.detect(
                     img_rgb=img_rgb,
                     wing_box=wing_box or last_wing,
@@ -104,7 +117,7 @@ class VideoTrackingPipeline:
 
                 # Notifica progresso periodico (max 2 volte al secondo)
                 now = time.time()
-                if now - last_progress_emit >= 0.5:
+                if now - last_progress_emit >= 0.4:
                     last_progress_emit = now
                     pct = int(min(90, 5 + (frame_idx / max(1, total_frames)) * 85))
                     if progress_callback:
@@ -118,14 +131,14 @@ class VideoTrackingPipeline:
         if progress_callback:
             progress_callback(92, "Stabilizzazione cinematografica traiettorie...")
 
-        # 3. Stabilizzazione traiettorie
+        # 3. Stabilizzazione cinematografica con outlier rejection
         smoothed_trajectory = self.smoother.smooth_trajectory(raw_samples)
 
         if progress_callback:
-            progress_callback(100, "Tracciamento completato!")
+            progress_callback(100, "Tracciamento completato con successo!")
 
         return {
-            "version": "1.0",
+            "version": "2.0",
             "sample_interval": self.sample_interval,
             "duration": round(duration_sec, 2),
             "video_width": width,

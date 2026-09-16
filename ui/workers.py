@@ -13,10 +13,12 @@ class AnalysisWorker(QThread):
     audio_analyzed = pyqtSignal(str, float, str, str) # video_path, confidenza, frase, pilota_audio
     wing_analyzed = pyqtSignal(str, list, float, str)  # video_path, colori, confidenza, pilota_visivo
     overall_progress = pyqtSignal(str, int)         # eta_text, percent_globale
-    phases_status = pyqtSignal(int, int, int, int)  # audio_done, wing_done, man_done, total_clips
+    phases_status = pyqtSignal(int, int, int, int, int)  # audio_done, wing_done, man_done, track_done, total_clips
     status_update = pyqtSignal(str)
     maneuvers_ready = pyqtSignal(str, list)         # video_path, list of chapters
     maneuver_progress = pyqtSignal(str, str, int)   # video_path, status_text, percent
+    tracking_ready = pyqtSignal(str, dict)          # video_path, tracking_dict
+    tracking_progress = pyqtSignal(str, str, int)   # video_path, status_text, percent
 
 
     def __init__(self, video_files, pilot_names, transcriber, priority_video=None, maneuver_detector=None, pilot_gliders=None):
@@ -82,16 +84,57 @@ class AnalysisWorker(QThread):
             print(f"[Worker] Errore calcolo manovre su {video_path}: {e}")
             self.maneuver_progress.emit(video_path, "Errore analisi manovre", 100)
 
+    def _process_tracking_for_video(self, video_path: str):
+        """Estrae e calcola in background il tracciamento di Pilota e Vela per il video indicato."""
+        try:
+            sc = SidecarData(video_path)
+            if sc.has_tracking():
+                self.tracking_progress.emit(video_path, "Tracciamento già presente", 100)
+                self.tracking_ready.emit(video_path, sc.tracking)
+                return
+
+            self.tracking_progress.emit(video_path, "Avvio tracciamento Pilota & Vela...", 10)
+            from core.tracking.pipeline import VideoTrackingPipeline
+            pipeline = VideoTrackingPipeline(sample_interval=0.20)
+
+            def on_track_prog(pct: int, msg: str):
+                if not self._is_cancelled:
+                    self.tracking_progress.emit(video_path, msg, pct)
+
+            def is_canc() -> bool:
+                return self._is_cancelled
+
+            tracking_result = pipeline.process_video(
+                video_path=video_path,
+                progress_callback=on_track_prog,
+                is_cancelled=is_canc
+            )
+
+            if self._is_cancelled:
+                return
+
+            if tracking_result:
+                sc.tracking = tracking_result
+                sc.save()
+                self.tracking_progress.emit(video_path, "Tracciamento completato", 100)
+                self.tracking_ready.emit(video_path, tracking_result)
+            else:
+                self.tracking_progress.emit(video_path, "Nessun dato di tracciamento", 100)
+        except Exception as e:
+            print(f"[AnalysisWorker] Errore tracking su {video_path}: {e}")
+            self.tracking_progress.emit(video_path, f"Errore tracking: {e}", 100)
+
     def run(self):
         detector = PilotDetector(pilots_list=self.pilot_names, transcriber=self.transcriber)
         man_detector = self.maneuver_detector
 
         # =====================================================================
-        # PREEMPTION P1: Se c'è un video prioritario aperto, calcola subito le manovre
+        # PREEMPTION P1: Se c'è un video prioritario aperto, calcola subito manovre & tracking
         # =====================================================================
         if self.priority_video:
-            self.status_update.emit(f"⚡ Rilevamento immediato manovre: {os.path.basename(self.priority_video)}...")
+            self.status_update.emit(f"⚡ Rilevamento immediato manovre e tracking: {os.path.basename(self.priority_video)}...")
             self._process_maneuvers_for_video(self.priority_video, detector, man_detector)
+            self._process_tracking_for_video(self.priority_video)
 
         total_clips = len(self.video_files)
 
@@ -110,6 +153,7 @@ class AnalysisWorker(QThread):
                 p_vid = self._requested_priority
                 self._requested_priority = None
                 self._process_maneuvers_for_video(p_vid, detector, man_detector)
+                self._process_tracking_for_video(p_vid)
 
             fname = os.path.basename(vf)
             sc = SidecarData(vf)
@@ -135,7 +179,7 @@ class AnalysisWorker(QThread):
                 self.clip_analyzed.emit(m)
                 self.clip_progress.emit(vf, 100.0, 100.0)
                 fase1_done += 1
-                self.phases_status.emit(fase1_done, fase1_done, 0, total_clips)
+                self.phases_status.emit(fase1_done, fase1_done, 0, 0, total_clips)
                 continue
 
             self.status_update.emit(f"[Fase 1A/2] Trascrizione radio pilota: {fname} ({i+1}/{total_clips})...")
@@ -211,8 +255,8 @@ class AnalysisWorker(QThread):
 
             fase1_done += 1
             f1_pct = int((fase1_done / total_clips) * 100)
-            self.phases_status.emit(fase1_done, fase1_done, 0, total_clips)
-            self.overall_progress.emit(f"🚀 Fase 1/2: Piloti identificati ({fase1_done}/{total_clips} clip)", f1_pct)
+            self.phases_status.emit(fase1_done, fase1_done, 0, 0, total_clips)
+            self.overall_progress.emit(f"🚀 Fase 1/3: Piloti identificati ({fase1_done}/{total_clips} clip)", f1_pct)
 
         # =====================================================================
         # FASE 2: RILEVAMENTO APPROFONDITO MANOVRE & CAPITOLI SIV
@@ -230,6 +274,7 @@ class AnalysisWorker(QThread):
                 p_vid = self._requested_priority
                 self._requested_priority = None
                 self._process_maneuvers_for_video(p_vid, detector, man_detector)
+                self._process_tracking_for_video(p_vid)
 
             fname = os.path.basename(vf)
             sc = SidecarData(vf)
@@ -238,10 +283,10 @@ class AnalysisWorker(QThread):
                 fase2_done += 1
                 self.maneuver_progress.emit(vf, f"{len(sc.chapters)} manovre caricate", 100)
                 self.maneuvers_ready.emit(vf, sc.chapters)
-                self.phases_status.emit(total_clips, total_clips, fase2_done, total_clips)
+                self.phases_status.emit(total_clips, total_clips, fase2_done, 0, total_clips)
                 continue
 
-            self.status_update.emit(f"[Fase 2/2] Analisi manovre: {fname} ({i+1}/{total_clips})...")
+            self.status_update.emit(f"[Fase 2/3] Analisi manovre: {fname} ({i+1}/{total_clips})...")
             self._process_maneuvers_for_video(vf, detector, man_detector)
 
             fase2_done += 1
@@ -253,12 +298,59 @@ class AnalysisWorker(QThread):
             m_rem = est_rem_sec // 60
             s_rem = est_rem_sec % 60
 
-            self.phases_status.emit(total_clips, total_clips, fase2_done, total_clips)
+            self.phases_status.emit(total_clips, total_clips, fase2_done, 0, total_clips)
             if rem_f2 > 0:
-                eta_str = f"⏱ Fase 2/2: Rilevamento manovre ({fase2_done}/{total_clips}) - ~{m_rem:02d}m {s_rem:02d}s rimanenti"
+                eta_str = f"⏱ Fase 2/3: Rilevamento manovre ({fase2_done}/{total_clips}) - ~{m_rem:02d}m {s_rem:02d}s rimanenti"
             else:
-                eta_str = f"✅ Analisi completa e manovre terminate ({total_clips} clip)"
+                eta_str = f"✅ Manovre completate ({total_clips} clip)"
 
             self.overall_progress.emit(eta_str, f2_pct)
 
-        self.status_update.emit("Analisi completata con successo.")
+        # =====================================================================
+        # FASE 3: CALCOLO TRACCIAMENTO PILOTA & VELA (Accodato in background)
+        # =====================================================================
+        self.status_update.emit("📍 Avvio Fase 3: Calcolo tracciamento Pilota & Vela in background...")
+        fase3_start_time = time.time()
+        fase3_done = 0
+
+        for i, vf in enumerate(self.video_files):
+            if self._is_cancelled:
+                return
+
+            if self._requested_priority:
+                p_vid = self._requested_priority
+                self._requested_priority = None
+                self._process_maneuvers_for_video(p_vid, detector, man_detector)
+                self._process_tracking_for_video(p_vid)
+
+            fname = os.path.basename(vf)
+            sc = SidecarData(vf)
+
+            if sc.has_tracking():
+                fase3_done += 1
+                self.tracking_progress.emit(vf, "Tracciamento già presente", 100)
+                self.tracking_ready.emit(vf, sc.tracking)
+                self.phases_status.emit(total_clips, total_clips, total_clips, fase3_done, total_clips)
+                continue
+
+            self.status_update.emit(f"[Fase 3/3] Tracciamento: {fname} ({i+1}/{total_clips})...")
+            self._process_tracking_for_video(vf)
+
+            fase3_done += 1
+            f3_pct = int((fase3_done / total_clips) * 100)
+            self.phases_status.emit(total_clips, total_clips, total_clips, fase3_done, total_clips)
+            elapsed_f3 = time.time() - fase3_start_time
+            avg_f3 = elapsed_f3 / max(1, fase3_done)
+            rem_f3 = total_clips - fase3_done
+            est_rem_sec = int(avg_f3 * rem_f3)
+            m_rem = est_rem_sec // 60
+            s_rem = est_rem_sec % 60
+
+            if rem_f3 > 0:
+                eta_str = f"⏱ Fase 3/3: Tracciamento ({fase3_done}/{total_clips}) - ~{m_rem:02d}m {s_rem:02d}s rimanenti"
+            else:
+                eta_str = f"✅ Analisi completa, manovre e tracciamento terminati ({total_clips} clip)"
+
+            self.overall_progress.emit(eta_str, f3_pct)
+
+        self.status_update.emit("Analisi, manovre e tracciamento completati con successo.")

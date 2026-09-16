@@ -14,7 +14,7 @@ class TrackingWorker(QThread):
     finished = pyqtSignal(str, dict)            # video_path, tracking_dict
     error = pyqtSignal(str, str)                # video_path, error_message
 
-    def __init__(self, video_path: str, sample_interval: float = 0.35, parent=None):
+    def __init__(self, video_path: str, sample_interval: float = 0.20, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.sample_interval = sample_interval

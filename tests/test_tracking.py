@@ -139,3 +139,29 @@ def test_real_video_frame_detection():
         assert pilot_box is not None
         assert pilot_box.y >= wing_box.y
         break
+
+
+def test_pipeline_on_real_sample_video():
+    video_path = "temp/test_deinterlace.mp4"
+    if not os.path.exists(video_path):
+        pytest.skip("temp/test_deinterlace.mp4 non disponibile")
+
+    pipeline = VideoTrackingPipeline(sample_interval=0.20)
+    res = pipeline.process_video(video_path)
+
+    assert res is not None
+    assert res["version"] == "2.0"
+    assert res["samples_count"] > 15
+    assert len(res["trajectory"]) > 15
+
+    # Verifica che la vela e il pilota siano tracciati
+    valid_wings = [s for s in res["trajectory"] if s["wing"] is not None]
+    valid_pilots = [s for s in res["trajectory"] if s["pilot"] is not None]
+
+    assert len(valid_wings) > 10
+    assert len(valid_pilots) > 10
+
+    # Verifica dimensioni ragionevoli dei box
+    first_w = valid_wings[0]["wing"]
+    assert first_w[2] > 30 and first_w[3] > 20
+

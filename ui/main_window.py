@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
         if videos_to_process:
             self.transcriber.set_model_size(model_name)
             self.page_table.update_overall_progress("Avvio analisi...", 0)
-            self.page_table.update_phases_status(0, 0, 0, len(videos_to_process))
+            self.page_table.update_phases_status(0, 0, 0, 0, len(videos_to_process))
             self.worker = AnalysisWorker(
                 video_files=videos_to_process,
                 pilot_names=pilot_names,
@@ -196,10 +196,13 @@ class MainWindow(QMainWindow):
             self.worker.maneuvers_ready.connect(self.page_player.update_chapters)
             self.worker.maneuver_progress.connect(self.page_player.set_maneuver_progress)
             self.worker.maneuver_progress.connect(self.page_table.update_maneuver_progress)
+            self.worker.tracking_ready.connect(self.page_player.update_tracking)
+            self.worker.tracking_progress.connect(self.page_player.set_tracking_progress)
             self.worker.start()
         else:
             self.page_table.hide_progress()
-            self.page_table.update_phases_status(len(self.video_files), len(self.video_files), len(self.video_files), len(self.video_files))
+            n_tot = len(self.video_files)
+            self.page_table.update_phases_status(n_tot, n_tot, n_tot, n_tot, n_tot)
             self.page_table.set_worker_status("Tutti i video sono già stati analizzati.")
 
     def _reset_analysis_data(self):
@@ -240,10 +243,10 @@ class MainWindow(QMainWindow):
     def _open_debriefing(self, video_path: str):
         self.page_player.open_video(video_path)
         sc = SidecarData(video_path)
-        if not sc.chapters:
+        if not sc.chapters or not sc.has_tracking():
             if self.worker and self.worker.isRunning():
                 self.worker.request_priority_video(video_path)
-            else:
+            elif not sc.chapters:
                 self._man_worker = ManeuverCalculationWorker(
                     video_path=video_path,
                     transcriber=self.transcriber,

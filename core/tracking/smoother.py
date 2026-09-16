@@ -1,42 +1,54 @@
 from typing import List, Dict, Any, Optional, Tuple
+import math
 
 
 class TrajectorySmoother:
     """
     Stabilizzatore e interpolatore temporale per le traiettorie di Pilota e Vela.
-    Applica un filtro di smoothing esponenziale (EMA dinamico) per prevenire
-    il jitter dovuto alla telecamera a mano, e fornisce interpolazione lineare
-    continua a qualsiasi framerate (sub-frame precision).
+    Caratteristiche:
+    - Rifiuto degli outlier (salto anomalo di coordinate non fisicamente plausibile)
+    - Riempimento automatico dei micro-buchi di rilevamento (gap filling)
+    - Smoothing cinematico adattivo basato sull'accelerazione angolare e lineare
+    - Interpolazione continua a sub-frame precision per riproduzione fluida
     """
-    def __init__(self, alpha: float = 0.35, velocity_boost: float = 0.65):
+    def __init__(
+        self,
+        alpha: float = 0.45,
+        velocity_boost: float = 0.85,
+        max_jump_px: float = 380.0
+    ):
         self.alpha = alpha
         self.velocity_boost = velocity_boost
+        self.max_jump_px = max_jump_px
 
     def smooth_trajectory(
         self,
         raw_samples: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Filtra la lista dei campioni temporali grezzi:
+        Stabilizza la lista dei campioni temporali grezzi:
         [{'t': 0.0, 'pilot': [x, y, w, h], 'wing': [x, y, w, h]}, ...]
-        Restituisce la lista con le coordinate stabilizzate.
         """
         if not raw_samples:
             return []
 
         # Ordina per timestamp
-        sorted_samples = sorted(raw_samples, key=lambda s: s.get("t", 0.0))
+        samples = sorted(raw_samples, key=lambda s: s.get("t", 0.0))
+        n = len(samples)
+
+        # 1. Riempimento dei buchi temporali isolati (gap filling per 1-2 frame mancanti)
+        samples = self._fill_isolated_gaps(samples)
+
         smoothed = []
+        last_pilot: Optional[List[float]] = None
+        last_wing: Optional[List[float]] = None
 
-        last_pilot = None
-        last_wing = None
-
-        for sample in sorted_samples:
+        for sample in samples:
             t = sample.get("t", 0.0)
             p_box = sample.get("pilot")
             w_box = sample.get("wing")
 
-            # Filtro Pilota
+            # Stabilizzazione Pilota
             if p_box is not None:
                 if last_pilot is None:
                     curr_p = [float(v) for v in p_box]
@@ -47,7 +59,7 @@ class TrajectorySmoother:
             else:
                 out_p = None
 
-            # Filtro Vela
+            # Stabilizzazione Vela
             if w_box is not None:
                 if last_wing is None:
                     curr_w = [float(v) for v in w_box]
@@ -66,11 +78,60 @@ class TrajectorySmoother:
 
         return smoothed
 
+    def _fill_isolated_gaps(self, samples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Interpola i frame singoli o doppi in cui il rilevamento ha perso temporaneamente il target."""
+        n = len(samples)
+        if n < 3:
+            return samples
+
+        result = [dict(s) for s in samples]
+
+        for target in ["pilot", "wing"]:
+            for i in range(1, n - 1):
+                if result[i].get(target) is None:
+                    # Controlla se i campioni prima e dopo sono validi
+                    prev_val = result[i - 1].get(target)
+                    next_val = result[i + 1].get(target)
+                    if prev_val is not None and next_val is not None:
+                        t_prev = result[i - 1]["t"]
+                        t_next = result[i + 1]["t"]
+                        t_curr = result[i]["t"]
+                        dt = max(1e-4, t_next - t_prev)
+                        factor = (t_curr - t_prev) / dt
+                        interp = [
+                            int(round(prev_val[j] + factor * (next_val[j] - prev_val[j])))
+                            for j in range(4)
+                        ]
+                        result[i][target] = interp
+
+        return result
+
     def _smooth_box(self, prev_box: List[float], curr_box: List[int]) -> List[float]:
-        """EMA con adattamento di velocità dinamica."""
-        # Se c'è un movimento rapido (manovra violenta, stallo, spirale), aumenta alpha
-        dist = abs(curr_box[0] - prev_box[0]) + abs(curr_box[1] - prev_box[1])
-        eff_alpha = self.velocity_boost if dist > 60 else self.alpha
+        """Filtro esponenziale adattivo con outlier rejection."""
+        # Distanza euclidea tra i centri
+        prev_cx = prev_box[0] + prev_box[2] * 0.5
+        prev_cy = prev_box[1] + prev_box[3] * 0.5
+        curr_cx = curr_box[0] + curr_box[2] * 0.5
+        curr_cy = curr_box[1] + curr_box[3] * 0.5
+
+        dist = math.hypot(curr_cx - prev_cx, curr_cy - prev_cy)
+
+        # Outlier Rejection: se il box fa un salto non fisico istantaneo, limita il movimento
+        if dist > self.max_jump_px:
+            clamp_factor = self.max_jump_px / max(1.0, dist)
+            curr_box = [
+                int(round(prev_box[0] + (curr_box[0] - prev_box[0]) * clamp_factor)),
+                int(round(prev_box[1] + (curr_box[1] - prev_box[1]) * clamp_factor)),
+                curr_box[2],
+                curr_box[3]
+            ]
+            eff_alpha = self.alpha
+        elif dist > 40:
+            # Movimento rapido (virata/spirale): aumenta reattività
+            eff_alpha = min(self.velocity_boost, self.alpha + (dist / 200.0) * (self.velocity_boost - self.alpha))
+        else:
+            # Volo dritto o scorrimento lento: smoothing massimo per stabilizzare camera shake
+            eff_alpha = self.alpha
 
         smoothed = []
         for p, c in zip(prev_box, curr_box):
@@ -85,7 +146,7 @@ class TrajectorySmoother:
     ) -> Tuple[Optional[List[int]], Optional[List[int]]]:
         """
         Dato un timestamp in secondi, trova i due campioni adiacenti
-        ed esegue un'interpolazione lineare (lerp) continua.
+        ed esegue un'interpolazione lineare continua.
         Ritorna: (pilot_box [x, y, w, h], wing_box [x, y, w, h])
         """
         if not trajectory:

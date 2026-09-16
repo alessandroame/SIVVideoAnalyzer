@@ -28,6 +28,11 @@ class TrackingPipWidget(QFrame):
         self.title = title
         self.accent_color = accent_color
         self.zoom_factor = 1.0
+        self.pan_norm_x = 0.0
+        self.pan_norm_y = 0.0
+        self._is_panning = False
+        self._drag_start_pos = QPoint()
+        self._drag_start_pan = (0.0, 0.0)
         self._current_crop_image: Optional[QImage] = None
 
         self._init_ui()
@@ -130,6 +135,7 @@ class TrackingPipWidget(QFrame):
             border-radius: 6px;
         """)
         self.lbl_viewport.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.lbl_viewport.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.lbl_viewport, stretch=1)
 
     def set_status_text(self, text: str):
@@ -145,6 +151,14 @@ class TrackingPipWidget(QFrame):
             border-radius: 6px;
         """)
 
+    def viewport_aspect_ratio(self) -> float:
+        """Restituisce il rapporto d'aspetto (larghezza / altezza) del viewport attuale per la vista panoramica."""
+        vw = self.lbl_viewport.width()
+        vh = self.lbl_viewport.height()
+        if vw > 20 and vh > 20:
+            return max(1.33, min(2.5, vw / vh))
+        return 16.0 / 9.0
+
     def update_crop(self, crop_image: Optional[QImage]):
         """Aggiorna il fotogramma ritagliato visualizzato all'interno del riquadro."""
         self._current_crop_image = crop_image
@@ -154,13 +168,23 @@ class TrackingPipWidget(QFrame):
             self.lbl_viewport.setStyleSheet("background-color: #030712; color: #64748b; font-size: 11px;")
             return
 
-        # Applica eventuale fattore di zoom centrato sul crop
+        # Applica eventuale fattore di zoom e pan sul crop
         img = crop_image
         if abs(self.zoom_factor - 1.0) > 0.05:
             zw = max(10, int(img.width() / self.zoom_factor))
             zh = max(10, int(img.height() / self.zoom_factor))
-            zx = max(0, (img.width() - zw) // 2)
-            zy = max(0, (img.height() - zh) // 2)
+            max_slack_x = max(0, (img.width() - zw) // 2)
+            max_slack_y = max(0, (img.height() - zh) // 2)
+
+            center_x = (img.width() - zw) // 2
+            center_y = (img.height() - zh) // 2
+
+            zx = int(center_x + self.pan_norm_x * max_slack_x)
+            zy = int(center_y + self.pan_norm_y * max_slack_y)
+
+            zx = max(0, min(img.width() - zw, zx))
+            zy = max(0, min(img.height() - zh, zy))
+
             img = img.copy(QRect(zx, zy, zw, zh))
 
         view_w = max(10, self.lbl_viewport.width())
@@ -169,7 +193,7 @@ class TrackingPipWidget(QFrame):
         pixmap = QPixmap.fromImage(img).scaled(
             view_w,
             view_h,
-            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation
         )
         self.lbl_viewport.setPixmap(pixmap)
@@ -186,10 +210,19 @@ class TrackingPipWidget(QFrame):
         self._set_zoom(max(1.0, round(self.zoom_factor - 0.25, 2)))
 
     def _reset_zoom(self):
+        self.pan_norm_x = 0.0
+        self.pan_norm_y = 0.0
         self._set_zoom(1.0)
 
     def _set_zoom(self, val: float):
         self.zoom_factor = val
+        if self.zoom_factor <= 1.05:
+            self.pan_norm_x = 0.0
+            self.pan_norm_y = 0.0
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+
         self.btn_zoom_reset.setText(f"{self.zoom_factor:.1f}x")
         if self._current_crop_image:
             self.update_crop(self._current_crop_image)
@@ -203,10 +236,58 @@ class TrackingPipWidget(QFrame):
             self._zoom_out()
         event.accept()
 
-    def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Ripristina lo zoom o notifica doppio clic."""
+    def mousePressEvent(self, event: QMouseEvent):
+        """Inizia l'operazione di Pan (trascinamento) se il riquadro è zoomato."""
         if event.button() == Qt.MouseButton.LeftButton:
-            if abs(self.zoom_factor - 1.0) > 0.05:
+            if self.zoom_factor > 1.05:
+                self._is_panning = True
+                self._drag_start_pos = event.pos()
+                self._drag_start_pan = (self.pan_norm_x, self.pan_norm_y)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Trascina la visuale (Pan) proporzionalmente al movimento del mouse."""
+        if self._is_panning and self._current_crop_image and not self._current_crop_image.isNull():
+            delta = event.pos() - self._drag_start_pos
+            img = self._current_crop_image
+            zw = max(10, int(img.width() / self.zoom_factor))
+            zh = max(10, int(img.height() / self.zoom_factor))
+            max_slack_x = max(1, (img.width() - zw) // 2)
+            max_slack_y = max(1, (img.height() - zh) // 2)
+
+            view_w = max(10, self.lbl_viewport.width())
+            view_h = max(10, self.lbl_viewport.height())
+
+            delta_norm_x = -(delta.x() * (zw / view_w)) / max_slack_x
+            delta_norm_y = -(delta.y() * (zh / view_h)) / max_slack_y
+
+            self.pan_norm_x = max(-1.0, min(1.0, self._drag_start_pan[0] + delta_norm_x))
+            self.pan_norm_y = max(-1.0, min(1.0, self._drag_start_pan[1] + delta_norm_y))
+
+            self.update_crop(self._current_crop_image)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Termina il trascinamento e ripristina il cursore."""
+        if event.button() == Qt.MouseButton.LeftButton and self._is_panning:
+            self._is_panning = False
+            if self.zoom_factor > 1.05:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Ripristina lo zoom e il pan o notifica doppio clic."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if abs(self.zoom_factor - 1.0) > 0.05 or abs(self.pan_norm_x) > 0.01 or abs(self.pan_norm_y) > 0.01:
                 self._reset_zoom()
             else:
                 self.double_clicked.emit()
