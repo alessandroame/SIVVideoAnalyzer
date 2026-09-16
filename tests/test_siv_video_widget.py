@@ -148,3 +148,53 @@ def test_siv_video_widget_arrow_keys(qapp):
     assert arrow_events == [-1, 1]
 
 
+def test_siv_video_widget_pan_and_zoom(qapp):
+    from PyQt6.QtGui import QWheelEvent
+    from PyQt6.QtCore import QPointF, QPoint
+
+    widget = SIVVideoWidget()
+    widget.resize(800, 600)
+    img = QImage(1920, 1080, QImage.Format.Format_RGB32)
+    img.fill(QColor(0, 0, 0))
+    widget.display_image(img)
+
+    assert widget._zoom_factor == 1.0
+    assert widget._pan_norm_x == 0.0
+    assert widget._pan_norm_y == 0.0
+
+    # Zoom in
+    widget.zoom_in()
+    assert widget._zoom_factor == 1.25
+
+    # Zoom out
+    widget.zoom_out()
+    assert widget._zoom_factor == 1.0
+
+    # Wheel zoom in
+    ev_wheel = QWheelEvent(
+        QPointF(400, 300),
+        QPointF(400, 300),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False
+    )
+    widget.wheelEvent(ev_wheel)
+    assert widget._zoom_factor > 1.0
+
+    # Test proiezione box con zoom
+    widget.set_bounding_boxes((200, 100, 300, 200), None)
+    mapped = widget._map_video_box_to_screen((200, 100, 300, 200))
+    assert mapped is not None
+    assert mapped.isValid()
+
+    # Reset zoom
+    widget.reset_zoom()
+    assert widget._zoom_factor == 1.0
+    assert widget._pan_norm_x == 0.0
+    assert widget._pan_norm_y == 0.0
+
+
+

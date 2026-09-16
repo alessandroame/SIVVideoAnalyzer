@@ -820,7 +820,7 @@ class DebriefingPlayerWidget(QWidget):
         curr_s = self.media_player.position() / 1000.0
         frame = self.video_widget._current_frame
         if frame and self.tracking_panel.isVisible():
-            self.tracking_panel.handle_qimage_frame(frame, curr_s, force=True)
+            self.tracking_panel.handle_qimage_frame(frame, curr_s, force=True, override_boxes={subject: box})
 
     def _on_keyframe_committed(self, subject: str, box: list):
         """Salva il keyframe creato dal rilascio del mouse, ricalcola e aggiorna la timeline."""

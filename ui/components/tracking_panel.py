@@ -153,13 +153,21 @@ class TrackingPanelWidget(QFrame):
 
         return QRect(rx, ry, rw, rh)
 
-    def handle_qimage_frame(self, qimg: QImage, curr_time_sec: float, force: bool = False):
+    def handle_qimage_frame(
+        self,
+        qimg: QImage,
+        curr_time_sec: float,
+        force: bool = False,
+        override_boxes: Optional[dict] = None
+    ):
         """Estrae i crop corrispondenti a Pilota e Vela a partire da un QImage
         e comanda l'aggiornamento dei due visualizzatori.
         Durante il playback continuo (force=False), limita gli aggiornamenti a max 25 fps (~40 ms)
         per preservare il 100% della fluidità del video principale.
+        Supporta override_boxes={'pilot': [x, y, w, h]} per aggiornamento live immediato
+        durante il trascinamento o ridimensionamento dei riquadri sul video principale.
         """
-        if not self.isVisible() or not self.current_sidecar or not self.current_sidecar.has_tracking():
+        if not self.isVisible():
             return
 
         if qimg is None or qimg.isNull():
@@ -173,7 +181,19 @@ class TrackingPanelWidget(QFrame):
         else:
             self._last_update_time = now
 
-        p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_time_sec)
+        p_box, w_box = None, None
+        if self.current_sidecar and self.current_sidecar.has_tracking():
+            p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_time_sec)
+
+        if override_boxes:
+            if "pilot" in override_boxes:
+                p_box = tuple(override_boxes["pilot"])
+            if "wing" in override_boxes:
+                w_box = tuple(override_boxes["wing"])
+
+        if not p_box and not w_box:
+            return
+
         img_w, img_h = qimg.width(), qimg.height()
 
         # Ritaglio Vela & Assetto (Vista Larga Panoramica con camera smoothing)

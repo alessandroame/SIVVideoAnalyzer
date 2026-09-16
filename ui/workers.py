@@ -1,5 +1,6 @@
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from core.sidecar_manager import SidecarData
@@ -57,8 +58,20 @@ class AnalysisWorker(QThread):
                 segments = cached.segments
                 self.maneuver_progress.emit(video_path, "Trascrizione trovata in cache", 40)
             else:
-                self.maneuver_progress.emit(video_path, "Ascolto radio istruttore (Whisper)...", 30)
-                m = detector.identify_pilot_from_audio(video_path)
+                self.maneuver_progress.emit(video_path, "Ascolto comandi radio (Whisper)...", 25)
+
+                def on_man_prog(curr_s, total_s):
+                    if not self._is_cancelled:
+                        dur = max(0.1, total_s)
+                        whisper_pct = int(min(1.0, curr_s / dur) * 45.0)
+                        self.maneuver_progress.emit(video_path, f"Trascrizione radio: {int(curr_s)}s/{int(total_s)}s", 25 + whisper_pct)
+
+                m = detector.identify_pilot_from_audio(
+                    video_path,
+                    progress_callback=on_man_prog,
+                    is_cancelled_callback=lambda: self._is_cancelled,
+                    quick_probe=False
+                )
                 segments = getattr(m, "segments", [])
 
             self.maneuver_progress.emit(video_path, "Analisi parole chiave manovre...", 70)
@@ -182,38 +195,47 @@ class AnalysisWorker(QThread):
                 self.phases_status.emit(fase1_done, fase1_done, 0, 0, total_clips)
                 continue
 
-            self.status_update.emit(f"[Fase 1A/2] Trascrizione radio pilota: {fname} ({i+1}/{total_clips})...")
+            self.status_update.emit(f"[Fase 1/3] Identificazione rapida (Radio 30s + Vela): {fname} ({i+1}/{total_clips})...")
 
             def on_file_prog(curr_s, dur_s):
                 if not self._is_cancelled:
                     self.clip_progress.emit(vf, curr_s, dur_s)
 
+            # Feedback immediato sulla riga della tabella
+            self.clip_progress.emit(vf, 1.0, 30.0)
+
             try:
-                # 1A. Fast probe audio (primi 90s per catturare la chiamata radio / radio check)
-                m = detector.identify_pilot_from_audio(
-                    vf,
-                    progress_callback=on_file_prog,
-                    is_cancelled_callback=lambda: self._is_cancelled,
-                    quick_probe=True,
-                    max_probe_seconds=90.0
-                )
+                # Esecuzione parallela: ThreadPoolExecutor esegue contemporaneamente:
+                # 1. Analisi Colore Vela dai frame video
+                # 2. Probe Audio max 30s con Whisper (con EARLY EXIT immediato se il nome è riconosciuto nei primi secondi)
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    wing_future = executor.submit(detect_wing_colors_from_video, vf, 0.0)
+                    audio_future = executor.submit(
+                        detector.identify_pilot_from_audio,
+                        vf,
+                        progress_callback=on_file_prog,
+                        is_cancelled_callback=lambda: self._is_cancelled,
+                        quick_probe=True,
+                        max_probe_seconds=30.0
+                    )
+                    
+                    # Ritiro risultati
+                    detected_cols = wing_future.result()
+                    m = audio_future.result()
+
                 if self._is_cancelled:
                     return
 
+                # Elabora esito audio
                 audio_detected_pilot = m.detected_pilot
                 audio_conf = m.confidence
                 radio_phrase = " | ".join(m.matched_phrases) if m.matched_phrases else ""
                 m.audio_confidence = audio_conf
-
-                # Emette immediatamente l'esito della sub-fase AUDIO
                 self.audio_analyzed.emit(vf, audio_conf, radio_phrase, audio_detected_pilot)
 
-                # 1B. Rilevamento cromatico vela (Wing Color Detector su keyframe)
-                self.status_update.emit(f"[Fase 1B/2] Isolamento vela & colori: {fname} ({i+1}/{total_clips})...")
-                detected_cols = detect_wing_colors_from_video(vf, duration=m.duration)
+                # Elabora esito vela
                 wing_detected_pilot = ""
                 wing_conf = 0.0
-
                 if detected_cols:
                     sc.wing_colors = [{"name": c[0], "hex": c[1]} for c in detected_cols]
                     m.wing_colors = sc.wing_colors
@@ -228,7 +250,6 @@ class AnalysisWorker(QThread):
                                     break
 
                 m.wing_confidence = wing_conf
-                # Emette immediatamente l'esito della sub-fase VELA
                 self.wing_analyzed.emit(vf, m.wing_colors, wing_conf, wing_detected_pilot)
 
                 # Fusione/Decisione pilota:

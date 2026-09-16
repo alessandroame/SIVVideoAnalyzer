@@ -101,3 +101,57 @@ def test_analysis_worker_phases_status_signal(qapp):
     # Emetti segnale con 5 parametri
     worker.phases_status.emit(2, 2, 2, 1, 2)
     assert received_phases == [(2, 2, 2, 1, 2)]
+
+
+def test_flight_table_six_columns_and_status_widget(qapp, tmp_path):
+    from PyQt6.QtWidgets import QHeaderView
+    from ui.components.processing_status_widget import ProcessingStatusWidget
+
+    table = FlightTableWidget()
+    assert table.table_flights.columnCount() == 6
+
+    # Verifica etichette delle intestazioni
+    headers = [table.table_flights.horizontalHeaderItem(c).text() for c in range(6)]
+    assert headers == ["File Video", "Data e Ora", "Volo N°", "Pilota Assegnato", "Stato Elaborazione", "Debriefing"]
+
+    # Verifica che SOLO la Colonna 4 sia in modalità Stretch
+    header = table.table_flights.horizontalHeader()
+    assert header.sectionResizeMode(0) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(1) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(3) == QHeaderView.ResizeMode.Interactive
+    assert header.sectionResizeMode(4) == QHeaderView.ResizeMode.Stretch
+    assert header.sectionResizeMode(5) == QHeaderView.ResizeMode.Interactive
+
+    # Crea un file finto e aggiungi una riga
+    v_file = str(tmp_path / "flight_test.mp4")
+    with open(v_file, "w") as f:
+        f.write("dummy")
+
+    table.add_flight_row(
+        video_path=v_file,
+        pilot="Mario Rossi",
+        flight_num=1,
+        glider="Ozone Enzo",
+        phrases="",
+        is_confirmed=False
+    )
+
+    assert table.table_flights.rowCount() == 1
+    cell_w = table.table_flights.cellWidget(0, 4)
+    assert isinstance(cell_w, ProcessingStatusWidget)
+    assert "In coda" in cell_w.lbl_status.text()
+
+    # Test aggiornamento progresso clip (Fase 1)
+    table.update_clip_progress(v_file, 15.0, 30.0)
+    assert "50%" in cell_w.lbl_status.text()
+    assert not cell_w.progress_bar.isHidden()
+
+    # Test completamento identificazione pilota
+    table.update_audio_result(v_file, 0.85, "Radio check", "Mario Rossi")
+    assert "Radio 85%" in cell_w.lbl_status.text()
+
+    # Test aggiornamento progresso manovre (Fase 2)
+    table.update_maneuver_progress(v_file, "Ascolto comandi", 50)
+    assert "50%" in cell_w.lbl_status.text()
+

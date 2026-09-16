@@ -45,7 +45,12 @@ class ManeuverCalculationWorker(QThread):
                         os.remove(cache_file)
                     except Exception:
                         pass
-                m = detector.identify_pilot_from_audio(self.video_path)
+                def on_trans_prog(curr_s, total_s):
+                    dur = max(0.1, total_s)
+                    pct = int(min(1.0, curr_s / dur) * 40.0)
+                    self.progress_update.emit(self.video_path, f"Trascrizione radio: {int(curr_s)}s/{int(total_s)}s", 30 + pct)
+
+                m = detector.identify_pilot_from_audio(self.video_path, progress_callback=on_trans_prog)
                 segments = getattr(m, "segments", [])
 
             print(f"\n[Whisper Log] --- Trascrizione audio per {base_name} ({len(segments)} segmenti trovati) ---")

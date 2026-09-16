@@ -1,9 +1,9 @@
 from typing import Optional, Tuple, List
 import cv2
 import numpy as np
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal, QRect, QPoint
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QImage, QBrush
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QImage, QBrush, QWheelEvent, QMouseEvent
 from PyQt6.QtMultimedia import QVideoSink, QVideoFrame
 
 
@@ -12,12 +12,11 @@ class SIVVideoWidget(QWidget):
     Viewport video nativo ad alte prestazioni basato su QVideoSink.
     Supporta:
     - Rendering video scalato con preservazione dell'aspect ratio (letterbox/pillarbox).
-    - Filtro di deinterlacciamento in-memory ultra-rapido (<0.8 ms) con accelerazione vettoriale
-      per eliminare le righe / effetto pettine dai filmati 1080i.
-    - Disegno in tempo reale delle bounding box per Vela (arancione) e Pilota (ciano)
-      con flag di attivazione/disattivazione e scorciatoia 'B'.
+    - Zoom nativo (1.0x - 5.0x) con rotellina del mouse o pulsanti overlay e Pan fluido.
+    - Filtro di deinterlacciamento in-memory ultra-rapido (<0.8 ms) con accelerazione vettoriale.
+    - Disegno e manipolazione in tempo reale delle bounding box per Vela (arancione) e Pilota (ciano),
+      con coordinate proiettate coerentemente nello spazio zoomato.
     - Interazione drag & drop e ridimensionamento tramite maniglie per correggere il tracking.
-    - Gestione completa dei comandi da tastiera e modalità a schermo intero.
     - Emissione segnale frame_decoded(QImage) per alimentare i visualizzatori PiP senza duplicare
       la conversione da QVideoFrame.
     """
@@ -29,7 +28,7 @@ class SIVVideoWidget(QWidget):
     toggle_boxes_requested = pyqtSignal()
     fullScreenChanged = pyqtSignal(bool)
     frame_decoded = pyqtSignal(QImage)
-    arrow_nav_requested = pyqtSignal(int)  # -1 = sinistra (indietro), +1 = destra (avanti)
+    arrow_nav_requested = pyqtSignal(int)
 
     # Segnali per correzione interattiva dei box e keyframe
     box_drag_started = pyqtSignal()
@@ -55,7 +54,15 @@ class SIVVideoWidget(QWidget):
         self._pilot_box: Optional[Tuple[int, int, int, int]] = None
         self._wing_box: Optional[Tuple[int, int, int, int]] = None
 
-        # Stato di interazione e trascinamento
+        # Parametri Pan e Zoom
+        self._zoom_factor: float = 1.0
+        self._pan_norm_x: float = 0.0
+        self._pan_norm_y: float = 0.0
+        self._is_panning: bool = False
+        self._pan_start_pos: Optional[QPoint] = None
+        self._pan_start_offsets: Tuple[float, float] = (0.0, 0.0)
+
+        # Stato di interazione e trascinamento riquadri
         self._hovered_target: Optional[str] = None
         self._hovered_handle: Optional[str] = None
         self._drag_target: Optional[str] = None
@@ -64,16 +71,88 @@ class SIVVideoWidget(QWidget):
         self._drag_orig_box: Optional[List[int]] = None
         self._active_target: str = "pilot"
 
+        # Overlay controlli Zoom rapidi
+        self._init_zoom_overlay()
+
+    def _init_zoom_overlay(self):
+        self.zoom_panel = QWidget(self)
+        zp_layout = QHBoxLayout(self.zoom_panel)
+        zp_layout.setContentsMargins(6, 4, 6, 4)
+        zp_layout.setSpacing(4)
+        self.zoom_panel.setStyleSheet("""
+            QWidget {
+                background-color: rgba(15, 23, 42, 0.85);
+                border: 1px solid #334155;
+                border-radius: 6px;
+            }
+        """)
+
+        self.btn_zoom_out = QPushButton("−")
+        self.btn_zoom_out.setFixedSize(22, 20)
+        self.btn_zoom_out.setToolTip("Riduci zoom video principale")
+        self.btn_zoom_out.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #94a3b8;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 13px;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover { background-color: #334155; color: #ffffff; border-color: #38bdf8; }
+        """)
+        self.btn_zoom_out.clicked.connect(self.zoom_out)
+        zp_layout.addWidget(self.btn_zoom_out)
+
+        self.btn_zoom_reset = QPushButton("1.0x")
+        self.btn_zoom_reset.setFixedHeight(20)
+        self.btn_zoom_reset.setToolTip("Clicca o doppio clic per ripristinare zoom 1.0x")
+        self.btn_zoom_reset.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #94a3b8;
+                border: none;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 0 4px;
+            }
+            QPushButton:hover { color: #38bdf8; }
+        """)
+        self.btn_zoom_reset.clicked.connect(self.reset_zoom)
+        zp_layout.addWidget(self.btn_zoom_reset)
+
+        self.btn_zoom_in = QPushButton("+")
+        self.btn_zoom_in.setFixedSize(22, 20)
+        self.btn_zoom_in.setToolTip("Aumenta zoom video principale")
+        self.btn_zoom_in.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #94a3b8;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #334155; color: #ffffff; border-color: #38bdf8; }
+        """)
+        self.btn_zoom_in.clicked.connect(self.zoom_in)
+        zp_layout.addWidget(self.btn_zoom_in)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "zoom_panel"):
+            zw = self.zoom_panel.sizeHint().width()
+            zh = self.zoom_panel.sizeHint().height()
+            self.zoom_panel.setGeometry(self.width() - zw - 14, 14, zw, zh)
+
     def set_scrubbing(self, scrubbing: bool):
-        """Imposta se è in corso un'operazione di scrubbing veloce."""
         self._is_scrubbing = scrubbing
 
     def videoSink(self) -> QVideoSink:
-        """Restituisce il QVideoSink associato a questo widget."""
         return self._sink
 
     def setAspectRatioMode(self, mode):
-        """Compatibilità interfaccia QVideoWidget."""
         pass
 
     def isFullScreen(self) -> bool:
@@ -97,20 +176,17 @@ class SIVVideoWidget(QWidget):
         wing_box: Optional[Tuple[int, int, int, int]],
         force_repaint: bool = True
     ):
-        """Aggiorna le coordinate attuali dei rettangoli di tracciamento in pixel nativi video."""
         self._pilot_box = pilot_box
         self._wing_box = wing_box
         if force_repaint and self._show_boxes:
             self.update()
 
     def set_show_bounding_boxes(self, show: bool):
-        """Attiva o disattiva la visualizzazione dei riquadri sul video principale."""
         if self._show_boxes != show:
             self._show_boxes = show
             self.update()
 
     def toggle_bounding_boxes(self) -> bool:
-        """Alterna lo stato di visualizzazione dei riquadri e restituisce il nuovo stato."""
         self.set_show_bounding_boxes(not self._show_boxes)
         return self._show_boxes
 
@@ -119,7 +195,6 @@ class SIVVideoWidget(QWidget):
         return self._show_boxes
 
     def set_deinterlace(self, enabled: bool):
-        """Abilita o disabilita il deinterlacciamento sui fotogrammi."""
         self._deinterlace_enabled = enabled
 
     def _on_video_frame(self, frame: QVideoFrame):
@@ -135,13 +210,11 @@ class SIVVideoWidget(QWidget):
             qimg = self._deinterlace_image(qimg)
 
         self._current_frame = qimg
-        # Emette il fotogramma decodificato per i visualizzatori PiP
         self.frame_decoded.emit(qimg)
         self.update()
 
     @staticmethod
     def _deinterlace_image(img: QImage) -> QImage:
-        """Filtro di deinterlacciamento scanline ultra-rapido (<0.8 ms) con cv2.addWeighted."""
         w, h = img.width(), img.height()
         if h <= 2 or w <= 0:
             return img
@@ -150,12 +223,10 @@ class SIVVideoWidget(QWidget):
         ptr = formatted.bits()
         ptr.setsize(formatted.sizeInBytes())
         arr = np.frombuffer(ptr, np.uint8).reshape((h, w, 4))
-        # Interpolazione delle righe dispari con media vettoriale delle righe adiacenti pari
         cv2.addWeighted(arr[0:-2:2], 0.5, arr[2::2], 0.5, 0, dst=arr[1:-1:2])
         return formatted
 
     def display_image(self, qimg: QImage):
-        """Visualizza direttamente un fotogramma QImage (utilizzato per scrubbing istantaneo)."""
         if qimg is None or qimg.isNull():
             return
         if self._deinterlace_enabled:
@@ -163,72 +234,45 @@ class SIVVideoWidget(QWidget):
         self._current_frame = qimg
         self.update()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    # =========================================================================
+    # METODI PAN & ZOOM
+    # =========================================================================
+    def zoom_in(self):
+        self.set_zoom(min(5.0, round(self._zoom_factor + 0.25, 2)))
 
-        # Sfondo nero per le bande letterbox/pillarbox
-        painter.fillRect(self.rect(), QColor("#000000"))
+    def zoom_out(self):
+        self.set_zoom(max(1.0, round(self._zoom_factor - 0.25, 2)))
 
-        if self._current_frame is None or self._current_frame.isNull():
-            painter.end()
-            return
+    def reset_zoom(self):
+        self._pan_norm_x = 0.0
+        self._pan_norm_y = 0.0
+        self.set_zoom(1.0)
 
-        w_w = self.width()
-        w_h = self.height()
-        src_w = self._current_frame.width()
-        src_h = self._current_frame.height()
+    def set_zoom(self, val: float):
+        self._zoom_factor = max(1.0, min(5.0, val))
+        if self._zoom_factor <= 1.02:
+            self._zoom_factor = 1.0
+            self._pan_norm_x = 0.0
+            self._pan_norm_y = 0.0
+            if not self._drag_target:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif not self._is_panning and not self._drag_target:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
 
-        if src_w <= 0 or src_h <= 0 or w_w <= 0 or w_h <= 0:
-            painter.end()
-            return
+        if hasattr(self, "btn_zoom_reset"):
+            self.btn_zoom_reset.setText(f"{self._zoom_factor:.1f}x")
+        self.update()
 
-        # Calcolo KeepAspectRatio
-        v_aspect = src_w / src_h
-        w_aspect = w_w / w_h
-
-        if w_aspect > v_aspect:
-            disp_h = w_h
-            disp_w = int(disp_h * v_aspect)
-            off_x = (w_w - disp_w) // 2
-            off_y = 0
-        else:
-            disp_w = w_w
-            disp_h = int(disp_w / v_aspect)
-            off_x = 0
-            off_y = (w_h - disp_h) // 2
-
-        target_rect, scale_x, scale_y = self._get_video_layout()
-        if target_rect is None:
-            painter.end()
-            return
-
-        painter.drawImage(target_rect, self._current_frame)
-
-        # Disegno dei riquadri di Pilota e Vela
-        if self._show_boxes and (self._wing_box or self._pilot_box):
-            font = QFont("Segoe UI", 10, QFont.Weight.Bold)
-            painter.setFont(font)
-
-            # 1. Riquadro VELA (Arancione #f59e0b)
-            if self._wing_box:
-                rw = self._map_video_box_to_screen(self._wing_box)
-                if rw:
-                    is_active = (self._hovered_target == "wing" or self._drag_target == "wing")
-                    self._draw_box_with_handles(painter, rw, "VELA", "#f59e0b", is_active)
-
-            # 2. Riquadro CORPO PILOTA (Ciano #06b6d4)
-            if self._pilot_box:
-                rp = self._map_video_box_to_screen(self._pilot_box)
-                if rp:
-                    is_active = (self._hovered_target == "pilot" or self._drag_target == "pilot")
-                    self._draw_box_with_handles(painter, rp, "PILOTA", "#06b6d4", is_active)
-
-        painter.end()
+    def wheelEvent(self, event: QWheelEvent):
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self.zoom_in()
+        elif delta < 0:
+            self.zoom_out()
+        event.accept()
 
     def _get_video_layout(self) -> Tuple[Optional[QRect], float, float]:
-        """Calcola il rettangolo video scalato a KeepAspectRatio e i fattori di scala."""
+        """Calcola il rettangolo video scalato a KeepAspectRatio su schermo e i fattori di scala base."""
         if self._current_frame is None or self._current_frame.isNull():
             return None, 1.0, 1.0
         w_w, w_h = self.width(), self.height()
@@ -254,12 +298,91 @@ class SIVVideoWidget(QWidget):
         scale_y = disp_h / src_h
         return QRect(off_x, off_y, disp_w, disp_h), scale_x, scale_y
 
+    def _get_source_crop(self) -> Tuple[QRect, float, float]:
+        """Calcola il ritaglio sorgente nel fotogramma video (in coordinate native) per zoom e pan."""
+        if self._current_frame is None or self._current_frame.isNull():
+            return QRect(0, 0, 1920, 1080), 1920.0, 1080.0
+        src_w = float(self._current_frame.width())
+        src_h = float(self._current_frame.height())
+
+        if self._zoom_factor <= 1.02:
+            return QRect(0, 0, int(src_w), int(src_h)), src_w, src_h
+
+        cw = max(10.0, src_w / self._zoom_factor)
+        ch = max(10.0, src_h / self._zoom_factor)
+
+        max_slack_x = max(0.0, (src_w - cw) / 2.0)
+        max_slack_y = max(0.0, (src_h - ch) / 2.0)
+
+        cx = (src_w / 2.0) + (self._pan_norm_x * max_slack_x)
+        cy = (src_h / 2.0) + (self._pan_norm_y * max_slack_y)
+
+        x0 = max(0.0, min(src_w - cw, cx - cw / 2.0))
+        y0 = max(0.0, min(src_h - ch, cy - ch / 2.0))
+
+        crop_rect = QRect(int(round(x0)), int(round(y0)), int(round(cw)), int(round(ch)))
+        return crop_rect, cw, ch
+
     def _map_video_box_to_screen(self, box: Tuple[int, int, int, int]) -> Optional[QRect]:
-        rect, sx, sy = self._get_video_layout()
+        rect, _, _ = self._get_video_layout()
         if not rect:
             return None
+        crop_rect, cw, ch = self._get_source_crop()
         bx, by, bw, bh = box
-        return QRect(rect.x() + int(bx * sx), rect.y() + int(by * sy), int(bw * sx), int(bh * sy))
+
+        sx = rect.width() / max(1.0, cw)
+        sy = rect.height() / max(1.0, ch)
+
+        screen_x = rect.x() + int(round((bx - crop_rect.x()) * sx))
+        screen_y = rect.y() + int(round((by - crop_rect.y()) * sy))
+        screen_w = int(round(bw * sx))
+        screen_h = int(round(bh * sy))
+        return QRect(screen_x, screen_y, screen_w, screen_h)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        # Sfondo nero per le bande letterbox/pillarbox
+        painter.fillRect(self.rect(), QColor("#000000"))
+
+        if self._current_frame is None or self._current_frame.isNull():
+            painter.end()
+            return
+
+        target_rect, _, _ = self._get_video_layout()
+        if target_rect is None:
+            painter.end()
+            return
+
+        source_crop, _, _ = self._get_source_crop()
+        painter.drawImage(target_rect, self._current_frame, source_crop)
+
+        # Disegno dei riquadri di Pilota e Vela
+        if self._show_boxes and (self._wing_box or self._pilot_box):
+            painter.save()
+            painter.setClipRect(target_rect)
+            font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+            painter.setFont(font)
+
+            # 1. Riquadro VELA (Arancione #f59e0b)
+            if self._wing_box:
+                rw = self._map_video_box_to_screen(self._wing_box)
+                if rw:
+                    is_active = (self._hovered_target == "wing" or self._drag_target == "wing")
+                    self._draw_box_with_handles(painter, rw, "VELA", "#f59e0b", is_active)
+
+            # 2. Riquadro CORPO PILOTA (Ciano #06b6d4)
+            if self._pilot_box:
+                rp = self._map_video_box_to_screen(self._pilot_box)
+                if rp:
+                    is_active = (self._hovered_target == "pilot" or self._drag_target == "pilot")
+                    self._draw_box_with_handles(painter, rp, "PILOTA", "#06b6d4", is_active)
+
+            painter.restore()
+
+        painter.end()
 
     def _draw_box_with_handles(self, painter: QPainter, r: QRect, label: str, color_hex: str, is_active: bool):
         pen = QPen(QColor(color_hex), 3.0 if is_active else 2.5)
@@ -304,8 +427,20 @@ class SIVVideoWidget(QWidget):
                 return subject, "move"
         return None, None
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QMouseEvent):
         self.setFocus()
+
+        # Pan con tasto centrale o destro ovunque
+        if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+            if self._zoom_factor > 1.02:
+                self._is_panning = True
+                self._pan_start_pos = event.pos()
+                self._pan_start_offsets = (self._pan_norm_x, self._pan_norm_y)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return
+
+        # Clic sinistro su un box di tracking per spostarlo / ridimensionarlo
         if event.button() == Qt.MouseButton.LeftButton and self._show_boxes:
             subj, handle = self._hit_test_boxes(event.pos())
             if subj:
@@ -320,12 +455,26 @@ class SIVVideoWidget(QWidget):
                 self.update()
                 event.accept()
                 return
+
+        # Clic sinistro fuori dai box quando il video è zoomato attiva il Pan
+        if event.button() == Qt.MouseButton.LeftButton and self._zoom_factor > 1.02:
+            self._is_panning = True
+            self._pan_start_pos = event.pos()
+            self._pan_start_offsets = (self._pan_norm_x, self._pan_norm_y)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, event: QMouseEvent):
+        # 1. Spostamento / Ridimensionamento Box di Tracking
         if self._drag_target and self._drag_orig_box and self._drag_start_pos:
-            rect, sx, sy = self._get_video_layout()
-            if rect and sx > 1e-4 and sy > 1e-4:
+            rect, _, _ = self._get_video_layout()
+            crop_rect, cw, ch = self._get_source_crop()
+            if rect and cw > 0 and ch > 0:
+                sx = rect.width() / cw
+                sy = rect.height() / ch
                 dx_vid = (event.pos().x() - self._drag_start_pos.x()) / sx
                 dy_vid = (event.pos().y() - self._drag_start_pos.y()) / sy
                 ox, oy, ow, oh = self._drag_orig_box
@@ -369,6 +518,28 @@ class SIVVideoWidget(QWidget):
                 event.accept()
                 return
 
+        # 2. Pan del video quando zoomato
+        if self._is_panning and self._pan_start_pos and self._zoom_factor > 1.02:
+            rect, _, _ = self._get_video_layout()
+            if rect and self._current_frame:
+                src_w = float(self._current_frame.width())
+                src_h = float(self._current_frame.height())
+                cw = max(10.0, src_w / self._zoom_factor)
+                ch = max(10.0, src_h / self._zoom_factor)
+                max_slack_x = max(1.0, (src_w - cw) / 2.0)
+                max_slack_y = max(1.0, (src_h - ch) / 2.0)
+
+                delta = event.pos() - self._pan_start_pos
+                delta_norm_x = -(delta.x() * (cw / max(1.0, float(rect.width())))) / max_slack_x
+                delta_norm_y = -(delta.y() * (ch / max(1.0, float(rect.height())))) / max_slack_y
+
+                self._pan_norm_x = max(-1.0, min(1.0, self._pan_start_offsets[0] + delta_norm_x))
+                self._pan_norm_y = max(-1.0, min(1.0, self._pan_start_offsets[1] + delta_norm_y))
+                self.update()
+                event.accept()
+                return
+
+        # 3. Hovering e forme del cursore
         subj, handle = self._hit_test_boxes(event.pos())
         if subj != self._hovered_target or handle != self._hovered_handle:
             self._hovered_target = subj
@@ -381,12 +552,23 @@ class SIVVideoWidget(QWidget):
             self.setCursor(Qt.CursorShape.SizeBDiagCursor)
         elif handle == "move":
             self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif self._zoom_factor > 1.02:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
         else:
             self.setCursor(Qt.CursorShape.ArrowCursor)
 
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event):
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._is_panning:
+            self._is_panning = False
+            if self._zoom_factor > 1.02:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+
         if event.button() == Qt.MouseButton.LeftButton and self._drag_target:
             curr_box = self._pilot_box if self._drag_target == "pilot" else self._wing_box
             if curr_box:
@@ -399,6 +581,19 @@ class SIVVideoWidget(QWidget):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._zoom_factor > 1.05 or abs(self._pan_norm_x) > 0.01 or abs(self._pan_norm_y) > 0.01:
+                self.reset_zoom()
+                event.accept()
+                return
+            else:
+                self.setFullScreen(not self.isFullScreen())
+                self.toggle_fullscreen_requested.emit()
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
 
     def leaveEvent(self, event):
         if self._hovered_target is not None or self._hovered_handle is not None:
@@ -437,8 +632,3 @@ class SIVVideoWidget(QWidget):
             event.accept()
         else:
             super().keyPressEvent(event)
-
-    def mouseDoubleClickEvent(self, event):
-        self.setFullScreen(not self.isFullScreen())
-        self.toggle_fullscreen_requested.emit()
-        event.accept()

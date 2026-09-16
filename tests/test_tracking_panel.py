@@ -183,3 +183,34 @@ def test_tracking_panel_deinterlace_crop(qapp):
     deint = TrackingPanelWidget._deinterlace_crop(img)
     assert deint.pixelColor(10, 1).red() == 180
 
+
+def test_tracking_panel_override_boxes(qapp, tmp_path):
+    panel = TrackingPanelWidget()
+    panel.show()
+
+    mock_video = tmp_path / "flight_test_override.mp4"
+    mock_video.touch()
+    sc = SidecarData(str(mock_video))
+    sc.tracking = {
+        "version": "1.0",
+        "sample_interval": 0.35,
+        "duration": 5.0,
+        "video_width": 640,
+        "video_height": 480,
+        "trajectory": [
+            {"t": 0.0, "pilot": [100, 150, 50, 80], "wing": [80, 40, 120, 80]}
+        ]
+    }
+    panel.set_sidecar(sc)
+
+    img = QImage(640, 480, QImage.Format.Format_RGBA8888)
+    img.fill(QColor(10, 20, 30))
+
+    # Aggiorna con override_boxes simulando il drag del box pilota
+    dragged_box = [200, 250, 70, 100]
+    panel.handle_qimage_frame(img, 0.0, force=True, override_boxes={"pilot": dragged_box})
+
+    assert panel.pip_pilot._current_crop_image is not None
+    assert not panel.pip_pilot._current_crop_image.isNull()
+
+

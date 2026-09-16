@@ -120,10 +120,11 @@ class PilotDetector:
     def set_pilots_list(self, pilots: List[str]):
         self.pilots_list = [p.strip() for p in pilots if p.strip()]
 
-    def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp", progress_callback=None, is_cancelled_callback=None, quick_probe: bool = False, max_probe_seconds: float = 90.0) -> VideoPilotMatch:
+    def identify_pilot_from_audio(self, video_path: str, temp_dir: str = "temp", progress_callback=None, is_cancelled_callback=None, quick_probe: bool = False, max_probe_seconds: float = 30.0) -> VideoPilotMatch:
         """
         Estrae l'audio, calcola la durata, trascrive e identifica il pilota.
-        Se quick_probe=True: estrae ed elabora solo i primi max_probe_seconds (ideale per la Fase 1 ultra-rapida).
+        Se quick_probe=True: estrae ed elabora al massimo max_probe_seconds (default 30s)
+        con EARLY EXIT immediato se il nome del pilota viene riconosciuto nei primi secondi.
         """
         os.makedirs(temp_dir, exist_ok=True)
         fname = os.path.basename(video_path)
@@ -145,9 +146,23 @@ class PilotDetector:
             wav_path = os.path.join(temp_dir, f"{base_name}_{'probe' if quick_probe else 'audio'}.wav")
             extract_audio(video_path, wav_path, duration=probe_duration if quick_probe else 0.0)
             
-            def on_segment(seg):
+            accumulated_segments: List[TranscriptionSegment] = []
+            early_exit_triggered = [False]
+
+            def on_segment(seg: TranscriptionSegment):
+                accumulated_segments.append(seg)
                 if progress_callback and duration > 0:
                     progress_callback(seg.end, duration)
+
+                # EARLY EXIT REATTIVO (solo in quick_probe):
+                # Se un pilota noto viene riconosciuto con sicurezza (>= 0.75) già nei primi secondi (es. 5s-10s),
+                # interrompiamo immediatamente Whisper senza sprecare altro tempo.
+                if quick_probe and self.pilots_list:
+                    curr_match = self.match_pilot_from_segments(video_path, accumulated_segments)
+                    if curr_match.detected_pilot and curr_match.detected_pilot not in ["In attesa...", "Da Assegnare"] and curr_match.confidence >= 0.75:
+                        early_exit_triggered[0] = True
+                        return False # Interrompe Whisper in transcribe()
+                return True
 
             segments = self.transcriber.transcribe(
                 wav_path, 

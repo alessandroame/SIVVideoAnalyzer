@@ -89,5 +89,5 @@ class TestCore(unittest.TestCase):
         self.assertIn("quick_probe", sig.parameters)
         self.assertIn("max_probe_seconds", sig.parameters)
         self.assertEqual(sig.parameters["quick_probe"].default, False)
-        self.assertEqual(sig.parameters["max_probe_seconds"].default, 90.0)
+        self.assertEqual(sig.parameters["max_probe_seconds"].default, 30.0)
 

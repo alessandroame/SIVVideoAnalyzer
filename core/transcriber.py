@@ -28,29 +28,54 @@ class SIVTranscriber:
     def load_model(self):
         if self._model is None or self._loaded_model_size != self.model_size:
             from faster_whisper import WhisperModel
+            import ctranslate2
+            import os
+            import numpy as np
+
             dev = self.device
             c_type = self.compute_type
+            cpu_threads = os.cpu_count() or 4
+
             if dev == "auto":
                 try:
-                    import torch
-                    dev = "cuda" if torch.cuda.is_available() else "cpu"
+                    if ctranslate2.get_cuda_device_count() > 0:
+                        dev = "cuda"
+                    else:
+                        dev = "cpu"
                 except Exception:
                     dev = "cpu"
-            
-            if dev == "cpu" and c_type == "default":
-                c_type = "int8"
-            elif dev == "cuda" and c_type == "default":
-                c_type = "float16"
 
-            import os
-            cpu_threads = os.cpu_count() or 4
-            self._model = WhisperModel(
-                self.model_size,
-                device=dev,
-                compute_type=c_type,
-                cpu_threads=cpu_threads,
-                num_workers=2
-            )
+            # Se è richiesto o rilevato CUDA, testiamo se le DLL cuBLAS/cuDNN sono presenti nel sistema
+            if dev == "cuda":
+                try:
+                    cuda_c_type = "float16" if c_type == "default" else c_type
+                    cand = WhisperModel(
+                        self.model_size,
+                        device="cuda",
+                        compute_type=cuda_c_type,
+                        cpu_threads=cpu_threads,
+                        num_workers=2
+                    )
+                    # Verifica che cublas64_12.dll sia effettivamente presente e funzionante
+                    dummy_audio = np.zeros(16000, dtype=np.float32)
+                    cand.detect_language(dummy_audio)
+                    self._model = cand
+                    print(f"[Transcriber] Whisper inizializzato con successo su GPU CUDA ({cuda_c_type}).")
+                except Exception as e:
+                    print(f"[Transcriber] GPU rilevata ma runtime CUDA non disponibile ({e}). Fallback automatico su CPU ultra-rapida (int8)...")
+                    dev = "cpu"
+
+            if dev == "cpu":
+                cpu_c_type = "int8" if c_type == "default" else c_type
+                self._model = WhisperModel(
+                    self.model_size,
+                    device="cpu",
+                    compute_type=cpu_c_type,
+                    cpu_threads=cpu_threads,
+                    num_workers=2
+                )
+                print(f"[Transcriber] Whisper inizializzato con successo su CPU ({cpu_c_type}, {cpu_threads} thread).")
+
             self._loaded_model_size = self.model_size
         return self._model
 
@@ -69,25 +94,58 @@ class SIVTranscriber:
             "stessa cosa, altra volta, 3 2 1 via tira deciso."
         )
 
-        # Disattivato vad_filter: il VAD (Silero) nei corsi SIV interpreta il fruscio del vento
-        # e le lunghe pause tra le manovre come silenzio totale, tagliando l'audio dopo pochi secondi.
-        segments, info = model.transcribe(
-            audio_path,
-            language=language,
-            beam_size=beam_size,
-            initial_prompt=siv_initial_prompt,
-            vad_filter=False,
-            condition_on_previous_text=False
-        )
-        
+        try:
+            segments, info = model.transcribe(
+                audio_path,
+                language=language,
+                beam_size=beam_size,
+                initial_prompt=siv_initial_prompt,
+                vad_filter=False,
+                condition_on_previous_text=False
+            )
+        except Exception as e:
+            if "cublas" in str(e).lower() or "cuda" in str(e).lower():
+                print(f"[Transcriber] Errore CUDA a runtime ({e}). Fallback forzato su CPU...")
+                self.device = "cpu"
+                self._model = None
+                model = self.load_model()
+                segments, info = model.transcribe(
+                    audio_path,
+                    language=language,
+                    beam_size=beam_size,
+                    initial_prompt=siv_initial_prompt,
+                    vad_filter=False,
+                    condition_on_previous_text=False
+                )
+            else:
+                raise e
+
         result = []
-        for s in segments:
-            if is_cancelled_callback and is_cancelled_callback():
-                break
-            seg = TranscriptionSegment(start=s.start, end=s.end, text=s.text.strip())
-            result.append(seg)
-            if progress_callback:
-                progress_callback(seg)
-                
+        try:
+            for s in segments:
+                if is_cancelled_callback and is_cancelled_callback():
+                    break
+                seg = TranscriptionSegment(start=s.start, end=s.end, text=s.text.strip())
+                result.append(seg)
+                if progress_callback:
+                    # Se il callback ritorna False o stop, interrompe tempestivamente (early exit)
+                    cb_res = progress_callback(seg)
+                    if cb_res is False:
+                        break
+        except Exception as e:
+            if "cublas" in str(e).lower() or "cuda" in str(e).lower():
+                print(f"[Transcriber] Errore CUDA durante l'iterazione ({e}). Fallback forzato su CPU...")
+                self.device = "cpu"
+                self._model = None
+                return self.transcribe(
+                    audio_path,
+                    language=language,
+                    beam_size=beam_size,
+                    progress_callback=progress_callback,
+                    is_cancelled_callback=is_cancelled_callback
+                )
+            else:
+                raise e
+
         return result
 

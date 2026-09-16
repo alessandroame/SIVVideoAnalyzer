@@ -204,7 +204,7 @@ class TrackingPipWidget(QFrame):
             self.update_crop(self._current_crop_image)
 
     def _zoom_in(self):
-        self._set_zoom(min(3.5, round(self.zoom_factor + 0.25, 2)))
+        self._set_zoom(min(5.0, round(self.zoom_factor + 0.25, 2)))
 
     def _zoom_out(self):
         self._set_zoom(max(1.0, round(self.zoom_factor - 0.25, 2)))
@@ -238,7 +238,7 @@ class TrackingPipWidget(QFrame):
 
     def mousePressEvent(self, event: QMouseEvent):
         """Inizia l'operazione di Pan (trascinamento) se il riquadro è zoomato."""
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton):
             if self.zoom_factor > 1.05:
                 self._is_panning = True
                 self._drag_start_pos = event.pos()
@@ -274,7 +274,7 @@ class TrackingPipWidget(QFrame):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Termina il trascinamento e ripristina il cursore."""
-        if event.button() == Qt.MouseButton.LeftButton and self._is_panning:
+        if self._is_panning:
             self._is_panning = False
             if self.zoom_factor > 1.05:
                 self.setCursor(Qt.CursorShape.OpenHandCursor)

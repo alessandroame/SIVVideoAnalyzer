@@ -1,3 +1,4 @@
+import os
 import time
 import pytest
 from PyQt6.QtWidgets import QApplication
@@ -13,6 +14,7 @@ def qapp():
     yield app
 
 
+@pytest.mark.skipif(not os.path.exists("temp/bench_yadif.mp4"), reason="File benchmark video opzionale non presente")
 def test_scrub_worker_valid_video(qapp):
     worker = ScrubWorker("temp/bench_yadif.mp4")
     frames = []
