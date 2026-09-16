@@ -44,6 +44,11 @@ class TrackingOverlayWidget(QWidget):
         self._user_dragged = False
         self._reposition_pips()
 
+    def set_status_all(self, text: str):
+        """Imposta lo stato testuale visibile su entrambi i riquadri di tracking."""
+        self.pip_wing.set_status_text(f"🟠 VELA & ASSETTO\n{text}")
+        self.pip_pilot.set_status_text(f"🔵 CORPO PILOTA\n{text}")
+
     def set_sidecar(self, sidecar: Optional[SidecarData]):
         """Assegna il sidecar del video attivo."""
         self.current_sidecar = sidecar
@@ -51,12 +56,17 @@ class TrackingOverlayWidget(QWidget):
             vw = sidecar.tracking.get("video_width", 1920)
             vh = sidecar.tracking.get("video_height", 1080)
             self._video_source_size = (vw, vh)
+        elif not sidecar or not sidecar.has_tracking():
+            self.set_status_all("In attesa di tracciamento...")
 
     def toggle_tracking(self) -> bool:
         """Alterna visibilità dei riquadri di tracking e ritorna il nuovo stato."""
         self.is_tracking_visible = not self.is_tracking_visible
         self.pip_wing.setVisible(self.is_tracking_visible)
         self.pip_pilot.setVisible(self.is_tracking_visible)
+        if self.is_tracking_visible:
+            self.pip_wing.raise_()
+            self.pip_pilot.raise_()
         self.update()
         return self.is_tracking_visible
 
@@ -182,3 +192,5 @@ class TrackingOverlayWidget(QWidget):
             pos_x = max(0, self.width() - pip_w - right_margin)
             self.pip_wing.move(pos_x, top_margin)
             self.pip_pilot.move(pos_x, top_margin + pip_h + spacing)
+            self.pip_wing.raise_()
+            self.pip_pilot.raise_()

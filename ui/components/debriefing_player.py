@@ -13,7 +13,7 @@ from ui.add_chapter_dialog import AddChapterQuickDialog
 from ui.detect_engine_dialog import DetectManeuversEngineDialog
 from ui.transcription_inspector_dialog import TranscriptionInspectorDialog
 from ui.wing_color_inspector_dialog import WingColorInspectorDialog
-from ui.components.tracking_overlay import TrackingOverlayWidget
+from ui.components.tracking_panel import TrackingPanelWidget
 from ui.components.siv_video_widget import SIVVideoWidget
 from ui.tracking_worker import TrackingWorker
 
@@ -106,13 +106,22 @@ class DebriefingPlayerWidget(QWidget):
         self.video_widget.toggle_tracking_requested.connect(self.toggle_tracking)
         self.media_player.setVideoOutput(self.video_widget)
 
-        # Overlay tracciamento Pilota e Vela
-        self.tracking_overlay = TrackingOverlayWidget(parent=self.video_widget)
-        self.video_widget.tracking_overlay = self.tracking_overlay
+        # Splitter orizzontale: Video Principale + Pannello Tracciamento Vela e Pilota
+        self.video_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.video_splitter.setStyleSheet("QSplitter::handle { background-color: #1e293b; width: 4px; border-radius: 2px; }")
+
+        # Pannello dedicato al tracciamento zoomato di Vela e Pilota
+        self.tracking_panel = TrackingPanelWidget()
         self.video_sink = self.video_widget.videoSink()
         self.video_sink.videoFrameChanged.connect(self._on_video_frame)
 
-        v_layout.addWidget(self.video_widget, stretch=1)
+        self.video_splitter.addWidget(self.video_widget)
+        self.video_splitter.addWidget(self.tracking_panel)
+        self.video_splitter.setStretchFactor(0, 7)
+        self.video_splitter.setStretchFactor(1, 3)
+        self.video_splitter.setSizes([740, 310])
+
+        v_layout.addWidget(self.video_splitter, stretch=1)
 
         # Controlli playback
         ctrl_bar = QHBoxLayout()
@@ -367,11 +376,13 @@ class DebriefingPlayerWidget(QWidget):
         fl = f" - Volo {self.current_sidecar.flight_number}" if self.current_sidecar.flight_number else ""
         self.lbl_flight_title.setText(f"{pilot}{fl} ({os.path.basename(video_path)})")
 
-        self.tracking_overlay.set_sidecar(self.current_sidecar)
+        self.tracking_panel.set_sidecar(self.current_sidecar)
         if self.current_sidecar.has_tracking():
             self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
         else:
-            self.btn_calc_tracking.setText("🎯 Calcola Tracciamento (PiP)")
+            self.btn_calc_tracking.setText("⏳ Calcolo Tracciamento (PiP)...")
+            self.tracking_panel.set_status_all("Calcolo automatico in corso...")
+            self._on_calc_tracking_clicked()
 
         self.media_player.setSource(QUrl.fromLocalFile(video_path))
         self.media_player.play()
@@ -517,8 +528,9 @@ class DebriefingPlayerWidget(QWidget):
         self.btn_fullscreen.setText("⛶ Schermo Intero (F)")
 
     def toggle_tracking(self):
-        is_visible = self.tracking_overlay.toggle_tracking()
-        if is_visible:
+        new_vis = not self.tracking_panel.isVisible()
+        self.tracking_panel.setVisible(new_vis)
+        if new_vis:
             self.btn_tracking.setText("🎯 Tracking ON (T)")
             self.btn_tracking.setStyleSheet("""
                 QPushButton {
@@ -546,9 +558,9 @@ class DebriefingPlayerWidget(QWidget):
             """)
 
     def _on_video_frame(self, frame):
-        if self.current_sidecar:
+        if self.current_sidecar and self.tracking_panel.isVisible():
             curr_s = self.media_player.position() / 1000.0
-            self.tracking_overlay.handle_video_frame(frame, curr_s)
+            self.tracking_panel.handle_video_frame(frame, curr_s)
 
     def _on_calc_tracking_clicked(self):
         if not self.current_video_path:
@@ -568,12 +580,13 @@ class DebriefingPlayerWidget(QWidget):
         self.btn_calc_tracking.setEnabled(True)
         if self.current_video_path == video_path:
             self.current_sidecar = SidecarData(video_path)
-            self.tracking_overlay.set_sidecar(self.current_sidecar)
+            self.tracking_panel.set_sidecar(self.current_sidecar)
             self.btn_calc_tracking.setText("✅ Tracciamento Pronto (Ricalcola)")
             self.set_maneuver_progress(video_path, "Tracciamento Pilota & Vela completato!", 100)
 
     def _on_tracking_error(self, video_path: str, err_msg: str):
         self.btn_calc_tracking.setEnabled(True)
         if self.current_video_path == video_path:
+            self.tracking_panel.set_status_all(f"Errore: {err_msg}")
             self.set_maneuver_progress(video_path, f"Errore tracciamento: {err_msg}", 100)
 

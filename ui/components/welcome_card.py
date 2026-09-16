@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from core.pilot_detector import parse_pilots_text
 
 class WelcomeCardWidget(QWidget):
     """Componente autonomo per la schermata iniziale di Setup / Welcome."""
@@ -21,7 +22,7 @@ class WelcomeCardWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         card = QFrame()
-        card.setFixedSize(660, 560)
+        card.setFixedSize(680, 580)
         card.setObjectName("welcomeCard")
         c_layout = QVBoxLayout(card)
         c_layout.setContentsMargins(36, 28, 36, 28)
@@ -139,8 +140,22 @@ class WelcomeCardWidget(QWidget):
 
         self.txt_pilots = QTextEdit()
         self.txt_pilots.setPlaceholderText("Mario Rossi - Rosso/Nero\nLuca Bianchi - Blu/Bianco\nAlessandro Ame - Lime/Nero")
-        self.txt_pilots.setFixedHeight(75)
+        self.txt_pilots.setFixedHeight(68)
         c_layout.addWidget(self.txt_pilots)
+
+        self.lbl_pilots_preview = QLabel("👥 Inserisci i piloti (es. uno per riga o separati da virgola)")
+        self.lbl_pilots_preview.setStyleSheet("""
+            background-color: #0b111e;
+            color: #64748b;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 11px;
+            font-weight: 500;
+        """)
+        self.lbl_pilots_preview.setWordWrap(True)
+        c_layout.addWidget(self.lbl_pilots_preview)
+        self.txt_pilots.textChanged.connect(self._update_pilots_preview)
 
         # 4. Modello Whisper & Config Manovre
         m_row = QHBoxLayout()
@@ -269,15 +284,8 @@ class WelcomeCardWidget(QWidget):
     def _import_discovered_pilots(self):
         if not hasattr(self, "_current_discovered_pilots") or not self._current_discovered_pilots:
             return
-        lines = [line.strip() for line in self.txt_pilots.toPlainText().splitlines() if line.strip()]
-        existing_names = set()
-        for l in lines:
-            if "-" in l:
-                existing_names.add(l.split("-", 1)[0].strip().lower())
-            elif "," in l:
-                existing_names.add(l.split(",", 1)[0].strip().lower())
-            else:
-                existing_names.add(l.strip().lower())
+        parsed = parse_pilots_text(self.txt_pilots.toPlainText())
+        existing_names = {p.lower() for p, _ in parsed}
 
         added = []
         for p, g in self._current_discovered_pilots.items():
@@ -288,9 +296,30 @@ class WelcomeCardWidget(QWidget):
                     added.append(p)
 
         if added:
-            all_lines = lines + added
-            self.txt_pilots.setPlainText("\n".join(all_lines))
+            current_text = self.txt_pilots.toPlainText().strip()
+            if current_text:
+                new_text = current_text + "\n" + "\n".join(added)
+            else:
+                new_text = "\n".join(added)
+            self.txt_pilots.setPlainText(new_text)
         self.btn_import_pilots.setVisible(False)
+
+    def _update_pilots_preview(self):
+        raw = self.txt_pilots.toPlainText()
+        parsed = parse_pilots_text(raw)
+        if not parsed:
+            self.lbl_pilots_preview.setText("ℹ️ Inserisci i piloti iscritti (es. uno per riga o separati da virgola: Mario Rossi - Rosso/Nero)")
+            self.lbl_pilots_preview.setStyleSheet("background-color: #0b111e; color: #64748b; border: 1px solid #1e293b; border-radius: 6px; padding: 4px 8px; font-size: 11px;")
+        else:
+            count = len(parsed)
+            items_str = " &nbsp;|&nbsp; ".join([
+                f"<b style='color:#f8fafc;'>{p}</b>" + (f" <span style='color:#38bdf8;'>({g})</span>" if g else "")
+                for p, g in parsed
+            ])
+            badge_icon = "👤" if count == 1 else "👥"
+            plural = "Pilota riconosciuto" if count == 1 else "Piloti riconosciuti"
+            self.lbl_pilots_preview.setText(f"{badge_icon} <b>{count} {plural}:</b> &nbsp; {items_str}")
+            self.lbl_pilots_preview.setStyleSheet("background-color: #0f172a; color: #38bdf8; border: 1px solid #0284c7; border-radius: 6px; padding: 4px 8px; font-size: 11px;")
 
     def _browse_source(self):
         d = QFileDialog.getExistingDirectory(self, "Seleziona cartella video SIV (Sorgente)", self.txt_folder.text().strip() or "")
@@ -307,24 +336,9 @@ class WelcomeCardWidget(QWidget):
         output = self.txt_output.text().strip()
         raw_text = self.txt_pilots.toPlainText()
         
-        pilot_names = []
-        pilot_gliders = {}
-        for line in raw_text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if "-" in line:
-                parts = line.split("-", 1)
-                p_name, g_color = parts[0].strip(), parts[1].strip()
-            elif "," in line:
-                parts = line.split(",", 1)
-                p_name, g_color = parts[0].strip(), parts[1].strip()
-            else:
-                p_name, g_color = line, ""
-            
-            if p_name:
-                pilot_names.append(p_name)
-                pilot_gliders[p_name.lower()] = g_color
+        parsed = parse_pilots_text(raw_text)
+        pilot_names = [p for p, _ in parsed]
+        pilot_gliders = {p.lower(): g for p, g in parsed}
 
         model = self.combo_model.currentData() or "small"
         self.session_started.emit(source, output, pilot_names, pilot_gliders, model)
@@ -337,6 +351,7 @@ class WelcomeCardWidget(QWidget):
             self.txt_output.setText(output)
         if pilots_raw:
             self.txt_pilots.setPlainText(pilots_raw)
+        self._update_pilots_preview()
         if model:
             idx = self.combo_model.findData(model)
             if idx >= 0:

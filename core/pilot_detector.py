@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from thefuzz import fuzz
 from core.audio_extractor import extract_audio, get_video_duration
 from core.transcriber import SIVTranscriber, TranscriptionSegment
@@ -26,6 +26,87 @@ class VideoPilotMatch:
             self.segments = []
         if self.wing_colors is None:
             self.wing_colors = []
+
+
+KNOWN_COLORS = {
+    'rosso', 'rossa', 'arancione', 'giallo', 'gialla', 'verde', 'lime',
+    'ciano', 'blu', 'azzurro', 'azzurra', 'viola', 'fucsia', 'rosa',
+    'bianco', 'bianca', 'nero', 'nera', 'grigio', 'grigia', 'oro', 'turchese',
+    'marrone', 'petrolio', 'red', 'orange', 'yellow', 'green', 'blue', 'white',
+    'black', 'purple', 'pink', 'grey', 'gray'
+}
+
+def parse_pilots_text(raw_text: str) -> List[Tuple[str, str]]:
+    """
+    Esegue il parsing flessibile del testo dei piloti e delle vele.
+    Supporta multi-line, separatori virgola/punto e virgola, elenchi numerati,
+    parentesi o descrizioni colore miste.
+    Ritorna una lista di tuple [(nome_pilota, descrizione_vela)].
+    """
+    if not raw_text or not raw_text.strip():
+        return []
+
+    raw_chunks = re.split(r'[\r\n;]+', raw_text)
+    entries = []
+
+    for chunk in raw_chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        
+        comma_parts = [p.strip() for p in chunk.split(',') if p.strip()]
+        if len(comma_parts) > 1:
+            curr_entry = comma_parts[0]
+            for part in comma_parts[1:]:
+                first_word = re.split(r'[\s\-:()]+', part)[0].lower()
+                if (first_word in KNOWN_COLORS or first_word in ['e', 'and', '&']) and ('-' in curr_entry or ':' in curr_entry):
+                    curr_entry += ', ' + part
+                else:
+                    entries.append(curr_entry)
+                    curr_entry = part
+            if curr_entry:
+                entries.append(curr_entry)
+        else:
+            entries.append(chunk)
+
+    results = []
+    seen = set()
+    for ent in entries:
+        ent = re.sub(r'^\s*[\d\.\-\*\)]+\s*', '', ent).strip()
+        if not ent:
+            continue
+        
+        m_paren = re.match(r'^([^\(]+)\((.+)\)$', ent)
+        if m_paren:
+            name = m_paren.group(1).strip()
+            glider = m_paren.group(2).strip()
+        elif '-' in ent:
+            parts = ent.split('-', 1)
+            name, glider = parts[0].strip(), parts[1].strip()
+        elif ':' in ent:
+            parts = ent.split(':', 1)
+            name, glider = parts[0].strip(), parts[1].strip()
+        else:
+            words = ent.split()
+            color_idx = -1
+            for i, w in enumerate(words):
+                w_clean = re.sub(r'[^a-zA-ZÀ-ÿ]', '', w).lower()
+                if w_clean in KNOWN_COLORS:
+                    color_idx = i
+                    break
+            if color_idx > 0:
+                name = ' '.join(words[:color_idx]).strip()
+                glider = ' '.join(words[color_idx:]).strip()
+            else:
+                name = ent
+                glider = ''
+        
+        name = ' '.join([w.capitalize() for w in name.split()])
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            results.append((name, glider))
+            
+    return results
 
 
 class PilotDetector:

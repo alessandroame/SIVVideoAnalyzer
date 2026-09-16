@@ -1,12 +1,18 @@
-﻿# SIV Video Analyzer
+# SIV Video Analyzer
 
 Software stand-alone desktop per l'analisi audio radio, catalogazione, debriefing didattico per volo e montaggio video per corsi SIV di parapendio.
 
 ## Avvio rapido
+
+**Metodo 1 - Doppio clic (Windows):**
+Fai doppio clic su `startup.bat` nella cartella del progetto.
+
+**Metodo 2 - Da terminale:**
 ```bash
-.\venv\Scripts\activate
+.\.venv\Scripts\activate
 python main.py
 ```
+
 
 ## Architettura Didattica per Volo (3 Step)
 1. **Step 1 - Configurazione, Schede Piloti (Vele e Colori) & Riconoscimento Radio**:

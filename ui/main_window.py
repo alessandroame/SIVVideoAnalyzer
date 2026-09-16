@@ -139,6 +139,8 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         videos_to_process = []
+        known_lower = [p.lower() for p in pilot_names]
+
         for vf in self.video_files:
             sc = SidecarData(vf)
             rec_dt = sc.recorded_at
@@ -148,8 +150,16 @@ class MainWindow(QMainWindow):
                     sc.recorded_at = rec_dt
                     sc.save()
 
-            glider_col = sc.glider or pilot_gliders.get(sc.pilot_name.lower(), "")
-            if sc.pilot_name:
+            is_corrupted_glider = bool(sc.glider and ("rosso / giallo, andrea" in sc.glider.lower() or "andrea bianco" in sc.glider.lower()))
+            pilot_valid = bool(sc.pilot_name and sc.pilot_name.lower() in known_lower)
+
+            if not sc.manual_override and (is_corrupted_glider or (sc.pilot_name and not pilot_valid)):
+                sc.pilot_name = ""
+                sc.glider = ""
+                sc.save()
+
+            glider_col = (pilot_gliders.get(sc.pilot_name.lower(), "") if sc.pilot_name else "") or sc.glider
+            if sc.pilot_name and (sc.pilot_name.lower() in known_lower or sc.manual_override):
                 calc_conf = 1.0 if sc.manual_override else (sc.confidence if sc.confidence > 0 else 0.90)
                 phrase = sc.radio_phrase or ("— (Nessuna chiamata radio)" if not sc.manual_override else "Assegnato manualmente")
                 self.page_table.add_flight_row(
