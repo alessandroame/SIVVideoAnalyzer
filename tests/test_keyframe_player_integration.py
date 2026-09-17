@@ -30,6 +30,29 @@ def test_keyframe_bar_ui(app):
     assert "2 Keyframe" in bar.lbl_status.text()
 
 
+def test_keyframe_bar_window_control(app):
+    bar = KeyframeBar()
+    assert bar.transition_window == 2.0
+
+    # Verifica emissione segnale variazione finestra
+    received_windows = []
+    bar.transition_window_changed.connect(received_windows.append)
+    bar.spin_window.setValue(3.5)
+    assert len(received_windows) == 1
+    assert received_windows[0] == 3.5
+
+    # Verifica set_transition_window senza emissione duplicata
+    bar.set_transition_window(4.0)
+    assert bar.transition_window == 4.0
+
+    # Verifica pulsante Crea Finestra
+    created_events = []
+    bar.create_window_requested.connect(lambda s, w: created_events.append((s, w)))
+    bar.btn_window.click()
+    assert len(created_events) == 1
+    assert created_events[0] == ("pilot", 4.0)
+
+
 def test_debriefing_player_keyframe_workflow(app, tmp_path):
     mock_video = tmp_path / "test_flight.mp4"
     mock_video.touch()
@@ -87,7 +110,17 @@ def test_debriefing_player_keyframe_workflow(app, tmp_path):
     # 5. Aggiungi di nuovo un keyframe ed eliminalo con il clic destro simulato dallo slider
     player._on_keyframe_committed("pilot", [160, 204, 50, 70])
     assert len(player.current_sidecar.get_tracking_keyframes("pilot")) == 1
+    # Verifica che lo slider abbia ricevuto gli intervalli di correzione per disegnare le fasce
+    intervals = player.slider._correction_intervals.get("pilot", [])
+    assert len(intervals) == 1
+    assert intervals[0]["keyframes"] == [2.0]
+
+    # Verifica cambio durata finestra tramite _on_transition_window_changed
+    player._on_transition_window_changed(3.0)
+    assert player.current_sidecar.get_tracking_transition_window() == 3.0
+
     # Trigger segnale di cancellazione da slider col tasto destro
     player._on_slider_keyframe_delete_requested("pilot", 2.0)
     assert len(player.current_sidecar.get_tracking_keyframes("pilot")) == 0
+    assert len(player.slider._correction_intervals.get("pilot", [])) == 0
 

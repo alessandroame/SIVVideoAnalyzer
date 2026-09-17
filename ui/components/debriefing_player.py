@@ -152,6 +152,8 @@ class DebriefingPlayerWidget(QWidget):
         self.keyframe_bar.next_keyframe_requested.connect(self._on_next_keyframe)
         self.keyframe_bar.reset_keyframes_requested.connect(self._on_reset_keyframes)
         self.keyframe_bar.active_subject_changed.connect(self._on_active_subject_changed)
+        self.keyframe_bar.transition_window_changed.connect(self._on_transition_window_changed)
+        self.keyframe_bar.create_window_requested.connect(self._on_create_window_requested)
         self.video_widget.active_subject_changed.connect(self.keyframe_bar.set_active_subject)
         v_layout.addWidget(self.keyframe_bar)
 
@@ -827,7 +829,9 @@ class DebriefingPlayerWidget(QWidget):
         if not self.current_sidecar or not self.current_sidecar.has_tracking():
             return
         curr_s = self.media_player.position() / 1000.0
-        self.current_sidecar.add_tracking_keyframe(subject, curr_s, box)
+        self.current_sidecar.add_tracking_keyframe(
+            subject, curr_s, box, window=self.keyframe_bar.transition_window
+        )
         self._update_keyframes_ui()
 
     def _on_add_keyframe(self, subject: str):
@@ -838,7 +842,9 @@ class DebriefingPlayerWidget(QWidget):
         p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_s)
         box = p_box if subject == "pilot" else w_box
         if box:
-            self.current_sidecar.add_tracking_keyframe(subject, curr_s, box)
+            self.current_sidecar.add_tracking_keyframe(
+                subject, curr_s, box, window=self.keyframe_bar.transition_window
+            )
             self._update_keyframes_ui()
 
     def _on_delete_keyframe(self, subject: str):
@@ -894,15 +900,39 @@ class DebriefingPlayerWidget(QWidget):
     def _on_active_subject_changed(self, subject: str):
         self.video_widget._active_target = subject
 
+    def _on_transition_window_changed(self, window: float):
+        """Aggiorna la finestra globale di transizione e ricalcola il tracciamento."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        self.current_sidecar.set_tracking_transition_window(window)
+        self._update_keyframes_ui()
+
+    def _on_create_window_requested(self, subject: str, window: float):
+        """Fissa una finestra di correzione al secondo corrente con l'ampiezza impostata."""
+        if not self.current_sidecar or not self.current_sidecar.has_tracking():
+            return
+        curr_s = self.media_player.position() / 1000.0
+        p_box, w_box = self.current_sidecar.get_tracking_boxes_at(curr_s)
+        box = p_box if subject == "pilot" else w_box
+        if box:
+            self.current_sidecar.add_tracking_keyframe(subject, curr_s, box, window=window)
+            self._update_keyframes_ui()
+
     def _update_keyframes_ui(self):
         """Sincronizza lo stato dei keyframe sulla barra, slider e riquadri."""
         if not self.current_sidecar or not self.current_sidecar.has_tracking():
             kfs = {"pilot": [], "wing": []}
+            intervals = {"pilot": [], "wing": []}
+            win = self.keyframe_bar.transition_window
         else:
             kfs = self.current_sidecar.get_tracking_keyframes()
+            intervals = self.current_sidecar.get_correction_intervals()
+            win = self.current_sidecar.get_tracking_transition_window()
 
         self.keyframe_bar.set_keyframes(kfs)
+        self.keyframe_bar.set_transition_window(win)
         self.slider.set_keyframes(kfs)
+        self.slider.set_correction_intervals(intervals)
 
         curr_s = self.media_player.position() / 1000.0
         if self.current_sidecar and self.current_sidecar.has_tracking():

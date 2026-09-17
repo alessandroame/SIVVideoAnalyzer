@@ -192,14 +192,40 @@ class SidecarData:
         from core.tracking.smoother import TrajectorySmoother
         return TrajectorySmoother.interpolate_boxes_at(tr["trajectory"], time_sec)
 
-    def add_tracking_keyframe(self, subject: str, t: float, box: List[int]) -> None:
+    def add_tracking_keyframe(self, subject: str, t: float, box: List[int], window: Optional[float] = None) -> None:
         """Aggiunge o aggiorna un keyframe per pilota o vela, ricalcola la traiettoria e salva il sidecar."""
         tr = self.data.get("tracking")
         if not tr or not tr.get("trajectory"):
             return
         from core.tracking.keyframe_manager import KeyframeManager
-        KeyframeManager.add_keyframe(tr, subject, t, box)
+        KeyframeManager.add_keyframe(tr, subject, t, box, window=window)
         self.save()
+
+    def get_tracking_transition_window(self) -> float:
+        """Restituisce la durata della finestra di transizione configurata per il tracciamento."""
+        tr = self.data.get("tracking")
+        if not tr:
+            from core.tracking.keyframe_manager import KeyframeManager
+            return KeyframeManager.DEFAULT_TRANSITION_WINDOW
+        from core.tracking.keyframe_manager import KeyframeManager
+        return KeyframeManager.get_transition_window(tr)
+
+    def set_tracking_transition_window(self, window: float) -> None:
+        """Imposta la durata della finestra di transizione e ricalcola la traiettoria."""
+        tr = self.data.get("tracking")
+        if not tr or not tr.get("trajectory"):
+            return
+        from core.tracking.keyframe_manager import KeyframeManager
+        KeyframeManager.set_transition_window(tr, window)
+        self.save()
+
+    def get_correction_intervals(self, subject: Optional[str] = None) -> Any:
+        """Restituisce gli intervalli temporali attivi di correzione (con zone di fade in/out)."""
+        tr = self.data.get("tracking")
+        if not tr:
+            return [] if subject else {"pilot": [], "wing": []}
+        from core.tracking.keyframe_manager import KeyframeManager
+        return KeyframeManager.get_correction_intervals(tr, subject=subject)
 
     def remove_tracking_keyframe(self, subject: str, t: float, tolerance: float = 0.35) -> bool:
         """Rimuove il keyframe al timestamp specificato, ricalcola la traiettoria e salva il sidecar."""
@@ -228,4 +254,5 @@ class SidecarData:
             return [] if subject else {"pilot": [], "wing": []}
         from core.tracking.keyframe_manager import KeyframeManager
         return KeyframeManager.get_keyframes(tr, subject=subject)
+
 

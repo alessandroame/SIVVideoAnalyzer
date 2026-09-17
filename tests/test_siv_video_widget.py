@@ -80,8 +80,9 @@ def test_siv_video_widget_paint_event_and_rendering(qapp):
     pix = widget.grab()
     assert pix is not None
     assert not pix.isNull()
-    assert pix.width() == 640
-    assert pix.height() == 360
+    dpr = widget.devicePixelRatio()
+    assert pix.width() == int(round(640 * dpr))
+    assert pix.height() == int(round(360 * dpr))
 
 
 def test_siv_video_widget_keypress_shortcuts(qapp):

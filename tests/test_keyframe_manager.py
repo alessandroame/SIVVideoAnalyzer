@@ -118,3 +118,112 @@ def test_sidecar_keyframe_integration(tmp_path):
     sidecar_reloaded.reset_tracking_keyframes()
     p_box_restored, _ = sidecar_reloaded.get_tracking_boxes_at(1.0)
     assert p_box_restored[0] == 105
+
+
+def test_isolated_keyframe_fade_in_and_fade_out():
+    """Verifica che un keyframe isolato sfumi all'interno della finestra e lasci intatto il resto."""
+    # Campioni ogni 0.5s da 0 a 20s con pilota costante a x=100
+    samples = [
+        {"t": round(i * 0.5, 2), "pilot": [100, 200, 50, 70], "wing": [80, 50, 120, 80]}
+        for i in range(41)
+    ]
+    tracking = {"trajectory": samples}
+
+    # Aggiungi keyframe a t=10.0 con pilota a x=300 e finestra di 2.0s
+    KeyframeManager.add_keyframe(tracking, "pilot", 10.0, [300, 200, 50, 70], window=2.0)
+
+    traj_dict = {s["t"]: s["pilot"][0] for s in tracking["trajectory"]}
+
+    # Fuori dalla finestra [8.0, 12.0]: tracciamento AI grezzo al 100% (x=100)
+    assert traj_dict[7.5] == 100
+    assert traj_dict[8.0] == 100
+    assert traj_dict[12.0] == 100
+    assert traj_dict[12.5] == 100
+    assert traj_dict[15.0] == 100
+
+    # Al keyframe esatto (t=10.0): x=300
+    assert traj_dict[10.0] == 300
+
+    # Fade In (t=9.0): valore compreso tra 100 e 300
+    assert 100 < traj_dict[9.0] < 300
+    # Fade Out (t=11.0): valore compreso tra 100 e 300
+    assert 100 < traj_dict[11.0] < 300
+    # Simmetria del fade attorno al keyframe
+    assert traj_dict[9.0] == traj_dict[11.0]
+
+
+def test_recovered_tracking_not_polluted_by_previous_delta():
+    """
+    Risolve il bug segnalato dall'utente:
+    Quando l'AI perde il pilota al secondo 10 e l'utente lo corregge,
+    il recupero dell'AI al secondo 11 NON deve essere spinto fuori schermo da un delta errato.
+    """
+    samples = [
+        # AI perde il pilota a t=10.0 (segnala x=100 invece di x=500)
+        {"t": 10.0, "pilot": [100, 400, 50, 70], "wing": None},
+        # AI recupera il pilota a t=11.0 (segnala x=505, corretto)
+        {"t": 11.0, "pilot": [505, 400, 50, 70], "wing": None},
+        # AI continua correttamente a t=13.0 (segnala x=515)
+        {"t": 13.0, "pilot": [515, 400, 50, 70], "wing": None}
+    ]
+    tracking = {"trajectory": samples}
+
+    # L'utente corregge il frame errato a t=10.0 impostando x=500 con finestra di 2.0s
+    KeyframeManager.add_keyframe(tracking, "pilot", 10.0, [500, 400, 50, 70], window=2.0)
+
+    traj_dict = {s["t"]: s["pilot"][0] for s in tracking["trajectory"]}
+
+    # A t=10.0: deve essere esattamente 500
+    assert traj_dict[10.0] == 500
+
+    # A t=11.0 (a metà fade out verso il recupero dell'AI):
+    # La nuova formula fonde kf (500) e recovered raw (505), risultando ~502-503.
+    # Con il VECCHIO codice sommava il delta (+400), facendo schizzare x a ~760!
+    assert 500 <= traj_dict[11.0] <= 505
+
+    # A t=13.0 (fuori finestra di 2.0s): deve essere esattamente il tracciamento recuperato dall'AI (515)
+    assert traj_dict[13.0] == 515
+
+
+def test_distant_keyframes_do_not_interfere():
+    """Keyframe a minuti diversi non devono alterare la traccia AI intermedia."""
+    samples = [
+        {"t": float(i), "pilot": [100, 200, 50, 70], "wing": [80, 50, 120, 80]}
+        for i in range(60)  # 1 minuto
+    ]
+    tracking = {"trajectory": samples}
+
+    # Keyframe 1 a t=5.0 (x=200), Keyframe 2 a t=45.0 (x=300) con finestra default 2.0s
+    KeyframeManager.add_keyframe(tracking, "pilot", 5.0, [200, 200, 50, 70], window=2.0)
+    KeyframeManager.add_keyframe(tracking, "pilot", 45.0, [300, 200, 50, 70], window=2.0)
+
+    traj_dict = {s["t"]: s["pilot"][0] for s in tracking["trajectory"]}
+
+    # Al keyframe 1 e 2
+    assert traj_dict[5.0] == 200
+    assert traj_dict[45.0] == 300
+
+    # A t=25.0 (esattamente a metà, lontano da entrambi): deve essere 100% traccia grezza (100)
+    assert traj_dict[25.0] == 100
+
+
+def test_correction_intervals_and_window_configuration():
+    """Verifica il calcolo degli intervalli di correzione per la timeline."""
+    tracking = {
+        "trajectory": [
+            {"t": float(i), "pilot": [100, 200, 50, 70], "wing": [80, 50, 120, 80]}
+            for i in range(30)
+        ]
+    }
+    # Imposta finestra globale a 1.5s
+    KeyframeManager.set_transition_window(tracking, 1.5)
+    assert KeyframeManager.get_transition_window(tracking) == 1.5
+
+    # Aggiungi keyframe a t=10.0
+    KeyframeManager.add_keyframe(tracking, "pilot", 10.0, [150, 200, 50, 70])
+    intervals = KeyframeManager.get_correction_intervals(tracking, "pilot")
+    assert len(intervals) == 1
+    assert intervals[0]["start"] == 8.5  # 10.0 - 1.5
+    assert intervals[0]["end"] == 11.5    # 10.0 + 1.5
+    assert intervals[0]["keyframes"] == [10.0]
+

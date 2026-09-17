@@ -1,5 +1,4 @@
 from typing import Dict, Any, List, Optional, Tuple
-import math
 
 
 class KeyframeManager:
@@ -7,20 +6,23 @@ class KeyframeManager:
     Gestore della correzione interattiva delle traiettorie tramite Keyframe.
     Supporta:
     - Architettura non distruttiva (conservazione di 'raw_trajectory')
-    - Delta-blending con curva Hermite/Smoothstep (3w^2 - 2w^3) per preservare
-      i micro-movimenti e la dinamica naturale registrata dall'AI
-    - Decadimento graduale alle estremità temporali (finestra di transizione fluida)
+    - Position Alpha-Blending con curva cubica Hermite / Smoothstep (3w^2 - 2w^3):
+      le correzioni sfumano dolcemente dal tracciamento AI (Fade In) ed escono
+      ricongiungendosi naturalmente al tracciamento AI recuperato (Fade Out)
+    - Finestra di transizione e correzione configurabile (default 2.0s)
+    - Isolamento temporale: i frame al di fuori della finestra di correzione
+      rimangono inalterati al 100%
+    - Interpolazione diretta multi-keyframe per cluster ravvicinati
     - Ripristino istantaneo al tracciamento grezzo AI
     """
 
-    DEFAULT_TRANSITION_WINDOW = 2.5  # secondi di transizione fluida per keyframe isolati o estremi
+    DEFAULT_TRANSITION_WINDOW = 2.0  # Durata predefinita (secondi) della finestra di fade in/out
 
     @staticmethod
     def ensure_raw_trajectory(tracking_dict: Dict[str, Any]) -> None:
         """Assicura che esista una copia immutabile della traiettoria grezza AI."""
         if "raw_trajectory" not in tracking_dict or not tracking_dict["raw_trajectory"]:
             current_traj = tracking_dict.get("trajectory", [])
-            # Copia profonda dei campioni
             tracking_dict["raw_trajectory"] = [
                 {
                     "t": s.get("t", 0.0),
@@ -29,6 +31,18 @@ class KeyframeManager:
                 }
                 for s in current_traj
             ]
+
+    @classmethod
+    def get_transition_window(cls, tracking_dict: Dict[str, Any]) -> float:
+        """Restituisce la durata della finestra di transizione configurata o il default."""
+        return float(tracking_dict.get("transition_window", cls.DEFAULT_TRANSITION_WINDOW))
+
+    @classmethod
+    def set_transition_window(cls, tracking_dict: Dict[str, Any], window: float) -> None:
+        """Imposta la durata della finestra di transizione e ricalcola la traiettoria."""
+        valid_win = max(0.2, min(15.0, float(window)))
+        tracking_dict["transition_window"] = round(valid_win, 2)
+        cls.recalculate_trajectory(tracking_dict, transition_window=valid_win)
 
     @staticmethod
     def get_keyframes(tracking_dict: Dict[str, Any], subject: Optional[str] = None) -> Any:
@@ -49,11 +63,12 @@ class KeyframeManager:
         subject: str,
         t: float,
         box: List[int],
-        transition_window: float = DEFAULT_TRANSITION_WINDOW
+        window: Optional[float] = None,
+        transition_window: Optional[float] = None
     ) -> None:
         """
         Aggiunge o aggiorna un keyframe per il soggetto ('pilot' o 'wing') al tempo t.
-        Ricalcola immediatamente la traiettoria 'trajectory'.
+        Ricalcola immediatamente la traiettoria 'trajectory' con fade in/out localizzato.
         """
         if subject not in ("pilot", "wing"):
             raise ValueError(f"Soggetto non valido: {subject}. Atteso 'pilot' o 'wing'.")
@@ -64,6 +79,7 @@ class KeyframeManager:
 
         t_rounded = round(float(t), 3)
         clean_box = [int(round(v)) for v in box[:4]]
+        eff_win = cls.get_transition_window(tracking_dict) if transition_window is None else transition_window
 
         # Controlla se esiste già un keyframe vicino (entro 0.05s) per aggiornarlo
         updated = False
@@ -71,17 +87,22 @@ class KeyframeManager:
             if abs(kf.get("t", 0.0) - t_rounded) <= 0.05:
                 kf["t"] = t_rounded
                 kf["box"] = clean_box
+                if window is not None:
+                    kf["window"] = round(float(window), 2)
                 updated = True
                 break
 
         if not updated:
-            subj_kfs.append({"t": t_rounded, "box": clean_box})
+            kf_entry: Dict[str, Any] = {"t": t_rounded, "box": clean_box}
+            if window is not None:
+                kf_entry["window"] = round(float(window), 2)
+            subj_kfs.append(kf_entry)
 
         # Ordina i keyframe temporalmente
         subj_kfs.sort(key=lambda k: k.get("t", 0.0))
 
         # Ricalcola la traiettoria
-        cls.recalculate_trajectory(tracking_dict, transition_window=transition_window)
+        cls.recalculate_trajectory(tracking_dict, transition_window=eff_win)
 
     @classmethod
     def remove_keyframe(
@@ -90,7 +111,7 @@ class KeyframeManager:
         subject: str,
         t: float,
         tolerance: float = 0.35,
-        transition_window: float = DEFAULT_TRANSITION_WINDOW
+        transition_window: Optional[float] = None
     ) -> bool:
         """Rimuove il keyframe più vicino a t (entro la tolleranza)."""
         kfs = cls.get_keyframes(tracking_dict)
@@ -102,7 +123,8 @@ class KeyframeManager:
         kfs[subject] = [kf for kf in subj_kfs if abs(kf.get("t", 0.0) - t) > tolerance]
 
         if len(kfs[subject]) < original_len:
-            cls.recalculate_trajectory(tracking_dict, transition_window=transition_window)
+            eff_win = cls.get_transition_window(tracking_dict) if transition_window is None else transition_window
+            cls.recalculate_trajectory(tracking_dict, transition_window=eff_win)
             return True
         return False
 
@@ -124,11 +146,11 @@ class KeyframeManager:
     def recalculate_trajectory(
         cls,
         tracking_dict: Dict[str, Any],
-        transition_window: float = DEFAULT_TRANSITION_WINDOW
+        transition_window: Optional[float] = None
     ) -> None:
         """
-        Ricalcola la lista 'trajectory' unendo 'raw_trajectory' con i keyframe manuali.
-        Utilizza un'interpolazione smoothstep (Hermite cubic) su ciascun asse x, y, w, h.
+        Ricalcola la lista 'trajectory' integrando 'raw_trajectory' con i keyframe manuali.
+        Utilizza un'interpolazione position-blending con sfumatura smoothstep (Hermite cubic).
         """
         cls.ensure_raw_trajectory(tracking_dict)
         raw_samples = tracking_dict.get("raw_trajectory", [])
@@ -139,7 +161,7 @@ class KeyframeManager:
         pilot_kfs = keyframes_all.get("pilot", [])
         wing_kfs = keyframes_all.get("wing", [])
 
-        # Se non ci sono keyframe in assoluto, la traiettoria coincide con la grezza
+        # Se non ci sono keyframe, la traiettoria coincide con la grezza
         if not pilot_kfs and not wing_kfs:
             tracking_dict["trajectory"] = [
                 {
@@ -151,8 +173,7 @@ class KeyframeManager:
             ]
             return
 
-        # Mappa temporale dei campioni raw per rapida ricerca binaria o accesso
-        times = [s["t"] for s in raw_samples]
+        win = cls.get_transition_window(tracking_dict) if transition_window is None else transition_window
         new_trajectory = []
 
         for sample in raw_samples:
@@ -164,20 +185,14 @@ class KeyframeManager:
                 t=t,
                 raw_box=raw_p,
                 keyframes=pilot_kfs,
-                raw_samples=raw_samples,
-                times=times,
-                subject="pilot",
-                window=transition_window
+                default_window=win
             )
 
             corr_w = cls._calculate_subject_box_at(
                 t=t,
                 raw_box=raw_w,
                 keyframes=wing_kfs,
-                raw_samples=raw_samples,
-                times=times,
-                subject="wing",
-                window=transition_window
+                default_window=win
             )
 
             new_trajectory.append({
@@ -189,69 +204,122 @@ class KeyframeManager:
         tracking_dict["trajectory"] = new_trajectory
 
     @classmethod
+    def get_correction_intervals(
+        cls,
+        tracking_dict: Dict[str, Any],
+        subject: Optional[str] = None,
+        default_window: Optional[float] = None
+    ) -> Any:
+        """
+        Restituisce gli intervalli temporali in cui la correzione manuale è attiva o sfumata.
+        Utile per disegnare sulla timeline le fasce evidenziate con le zone di fade.
+        Formato per soggetto: [{'start': t_start, 'end': t_end, 'keyframes': [t1, t2, ...]}]
+        """
+        def_win = cls.get_transition_window(tracking_dict) if default_window is None else default_window
+        kfs_all = cls.get_keyframes(tracking_dict)
+
+        def _compute_for_subject(subj_name: str) -> List[Dict[str, Any]]:
+            subj_kfs = kfs_all.get(subj_name, [])
+            if not subj_kfs:
+                return []
+
+            intervals: List[Dict[str, Any]] = []
+            cur_start = None
+            cur_end = None
+            cur_times: List[float] = []
+
+            for kf in subj_kfs:
+                t_kf = float(kf.get("t", 0.0))
+                w_kf = float(kf.get("window", def_win))
+                k_start = max(0.0, t_kf - w_kf)
+                k_end = t_kf + w_kf
+
+                if cur_start is None:
+                    cur_start = k_start
+                    cur_end = k_end
+                    cur_times = [t_kf]
+                elif k_start <= cur_end:
+                    # Sovrapposizione o giunzione continua
+                    cur_end = max(cur_end, k_end)
+                    cur_times.append(t_kf)
+                else:
+                    intervals.append({
+                        "start": round(cur_start, 2),
+                        "end": round(cur_end, 2),
+                        "keyframes": cur_times
+                    })
+                    cur_start = k_start
+                    cur_end = k_end
+                    cur_times = [t_kf]
+
+            if cur_start is not None and cur_end is not None:
+                intervals.append({
+                    "start": round(cur_start, 2),
+                    "end": round(cur_end, 2),
+                    "keyframes": cur_times
+                })
+
+            return intervals
+
+        if subject:
+            return _compute_for_subject(subject)
+        return {
+            "pilot": _compute_for_subject("pilot"),
+            "wing": _compute_for_subject("wing")
+        }
+
+    @classmethod
     def _calculate_subject_box_at(
         cls,
         t: float,
         raw_box: Optional[List[int]],
         keyframes: List[Dict[str, Any]],
-        raw_samples: List[Dict[str, Any]],
-        times: List[float],
-        subject: str,
-        window: float
+        default_window: float
     ) -> Optional[List[int]]:
-        """Calcola la box corretta per un soggetto a un dato timestamp."""
+        """
+        Calcola la box corretta per un soggetto a un dato timestamp t utilizzando
+        position alpha-blending e fade in/out localizzato.
+        """
         if not keyframes:
             return raw_box
 
-        # Caso 1: t è precedente o uguale al primo keyframe
+        # Caso 1: t precede il primo keyframe
         if t <= keyframes[0]["t"]:
             kf0 = keyframes[0]
             t0 = kf0["t"]
-            raw0 = cls._get_raw_at_time(t0, raw_samples, subject)
-            delta0 = cls._compute_delta(kf0["box"], raw0)
+            w0 = float(kf0.get("window", default_window))
+            t_start = t0 - w0
+
+            if t < t_start:
+                # Fuori dalla finestra di correzione: traccia AI intatta
+                return raw_box
 
             if t >= t0 - 1e-4:
-                smooth_factor = 1.0
-            elif window <= 1e-4:
-                return raw_box
-            else:
-                t_start = t0 - window
-                if t < t_start:
-                    return raw_box
-                ratio = (t - t_start) / max(1e-4, t0 - t_start)
-                smooth_factor = cls._smoothstep(ratio)
+                return list(kf0["box"])
 
-            return cls._apply_delta_or_interp(
-                raw_box=raw_box,
-                delta=[smooth_factor * d for d in delta0],
-                fallback_target=kf0["box"],
-                factor=smooth_factor
-            )
+            # Fade In graduale verso il primo keyframe
+            ratio = (t - t_start) / max(1e-4, t0 - t_start)
+            alpha = cls._smoothstep(ratio)
+            return cls._blend_boxes(raw_box, kf0["box"], alpha)
 
-        # Caso 2: t è successivo o uguale all'ultimo keyframe
+        # Caso 2: t succede l'ultimo keyframe
         if t >= keyframes[-1]["t"]:
             kf_last = keyframes[-1]
             t_last = kf_last["t"]
-            raw_last = cls._get_raw_at_time(t_last, raw_samples, subject)
-            delta_last = cls._compute_delta(kf_last["box"], raw_last)
+            w_last = float(kf_last.get("window", default_window))
+            t_end = t_last + w_last
+
+            if t > t_end:
+                # Fuori dalla finestra di correzione: traccia AI intatta
+                return raw_box
 
             if t <= t_last + 1e-4:
-                smooth_factor = 1.0
-            elif window <= 1e-4:
-                return raw_box
-            else:
-                t_end = t_last + window
-                if t > t_end:
-                    return raw_box
-                ratio = (t_end - t) / max(1e-4, t_end - t_last)
-                smooth_factor = cls._smoothstep(ratio)
+                return list(kf_last["box"])
 
-            return cls._apply_delta_or_interp(
-                raw_box=raw_box,
-                delta=[smooth_factor * d for d in delta_last],
-                fallback_target=kf_last["box"],
-                factor=smooth_factor
-            )
+            # Fade Out graduale verso la traccia AI recuperata
+            ratio = (t_end - t) / max(1e-4, t_end - t_last)
+            alpha = cls._smoothstep(ratio)
+            return cls._blend_boxes(raw_box, kf_last["box"], alpha)
 
         # Caso 3: t è compreso tra due keyframe kf_prev e kf_next
         kf_prev = keyframes[0]
@@ -264,34 +332,43 @@ class KeyframeManager:
 
         t_prev = kf_prev["t"]
         t_next = kf_next["t"]
+        if abs(t - t_prev) < 1e-4:
+            return list(kf_prev["box"])
+        if abs(t - t_next) < 1e-4:
+            return list(kf_next["box"])
+
+        w_prev = float(kf_prev.get("window", default_window))
+        w_next = float(kf_next.get("window", default_window))
         dt = max(1e-4, t_next - t_prev)
-        w = max(0.0, min(1.0, (t - t_prev) / dt))
-        s = cls._smoothstep(w)
 
-        raw_prev = cls._get_raw_at_time(t_prev, raw_samples, subject)
-        raw_next = cls._get_raw_at_time(t_next, raw_samples, subject)
-
-        delta_prev = cls._compute_delta(kf_prev["box"], raw_prev)
-        delta_next = cls._compute_delta(kf_next["box"], raw_next)
-
-        if raw_box is not None:
-            # Delta blending: (1 - s) * delta_prev + s * delta_next
-            interp_delta = [
-                (1.0 - s) * delta_prev[j] + s * delta_next[j]
-                for j in range(4)
-            ]
-            return [
-                int(round(raw_box[j] + interp_delta[j]))
-                for j in range(4)
-            ]
-        else:
-            # Se raw_box è None (soggetto perso), interpola direttamente le box assolute
+        # Verifica se i due keyframe appartengono allo stesso cluster di correzione
+        # oppure se la distanza è sufficientemente ampia da separare le due finestre
+        if dt <= (w_prev + w_next):
+            # Cluster continuo: interpolazione diretta tra i due keyframe manuali (alpha = 1.0)
+            # Immune da anomalie o perdite dell'AI nell'intervallo manuale
+            w = max(0.0, min(1.0, (t - t_prev) / dt))
+            s = cls._smoothstep(w)
             b_prev = kf_prev["box"]
             b_next = kf_next["box"]
             return [
                 int(round((1.0 - s) * b_prev[j] + s * b_next[j]))
                 for j in range(4)
             ]
+        else:
+            # Keyframe distanti: due correzioni separate con intervallo AI puro nel mezzo
+            if t <= t_prev + w_prev:
+                # Zona di Fade Out del keyframe precedente
+                ratio = (t_prev + w_prev - t) / max(1e-4, w_prev)
+                alpha = cls._smoothstep(ratio)
+                return cls._blend_boxes(raw_box, kf_prev["box"], alpha)
+            elif t >= t_next - w_next:
+                # Zona di Fade In del keyframe successivo
+                ratio = (t - (t_next - w_next)) / max(1e-4, w_next)
+                alpha = cls._smoothstep(ratio)
+                return cls._blend_boxes(raw_box, kf_next["box"], alpha)
+            else:
+                # Intervallo intermedio: tracciamento originale AI al 100%
+                return raw_box
 
     @staticmethod
     def _smoothstep(x: float) -> float:
@@ -300,45 +377,24 @@ class KeyframeManager:
         return clamped * clamped * (3.0 - 2.0 * clamped)
 
     @staticmethod
-    def _compute_delta(kf_box: List[int], raw_box: Optional[List[int]]) -> List[float]:
-        """Calcola il vettore scostamento [dx, dy, dw, dh] del keyframe rispetto al rilevamento base."""
-        if not raw_box:
-            return [0.0, 0.0, 0.0, 0.0]
-        return [float(kf_box[i] - raw_box[i]) for i in range(4)]
-
-    @staticmethod
-    def _apply_delta_or_interp(
+    def _blend_boxes(
         raw_box: Optional[List[int]],
-        delta: List[float],
-        fallback_target: List[int],
-        factor: float
+        kf_box: List[int],
+        alpha: float
     ) -> Optional[List[int]]:
-        """Applica il delta alla box raw se presente, altrimenti scala verso il fallback_target."""
-        if raw_box is not None:
-            return [
-                int(round(raw_box[i] + delta[i]))
-                for i in range(4)
-            ]
-        elif factor > 0.1:
-            return list(fallback_target)
-        return None
-
-    @staticmethod
-    def _get_raw_at_time(
-        t: float,
-        raw_samples: List[Dict[str, Any]],
-        subject: str
-    ) -> Optional[List[int]]:
-        """Trova il campione raw per il dato soggetto più vicino nel tempo."""
-        if not raw_samples:
+        """
+        Fonde in modo graduale (alpha blending) la box raw con la box del keyframe.
+        alpha = 0.0 -> 100% raw_box (tracciamento AI originale)
+        alpha = 1.0 -> 100% kf_box (keyframe manuale)
+        Se raw_box non è disponibile (bersaglio perso dall'AI), mantiene la box del keyframe
+        finché alpha > 0.05 per evitare sparizioni o glitch.
+        """
+        if raw_box is None:
+            if alpha > 0.05:
+                return [int(round(v)) for v in kf_box[:4]]
             return None
-        best_dist = 999999.0
-        best_sample = None
-        for s in raw_samples:
-            d = abs(s["t"] - t)
-            if d < best_dist:
-                best_dist = d
-                best_sample = s
-            elif d > best_dist:
-                break
-        return best_sample.get(subject) if best_sample else None
+
+        return [
+            int(round((1.0 - alpha) * raw_box[j] + alpha * kf_box[j]))
+            for j in range(4)
+        ]

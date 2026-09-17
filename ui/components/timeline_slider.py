@@ -20,6 +20,7 @@ class SIVTimelineSlider(QSlider):
 
         self._chapters = []
         self._keyframes = {"pilot": [], "wing": []}
+        self._correction_intervals = {"pilot": [], "wing": []}
         self.is_dragging = False
         self._hovered_chapter = None
         self._hovered_keyframe = None
@@ -39,6 +40,11 @@ class SIVTimelineSlider(QSlider):
     def set_keyframes(self, keyframes: dict):
         """Imposta i keyframe di tracciamento {'pilot': [...], 'wing': [...]}."""
         self._keyframes = keyframes if isinstance(keyframes, dict) else {"pilot": [], "wing": []}
+        self.update()
+
+    def set_correction_intervals(self, intervals: dict):
+        """Imposta gli intervalli temporali attivi di correzione per pilota e vela."""
+        self._correction_intervals = intervals if isinstance(intervals, dict) else {"pilot": [], "wing": []}
         self.update()
 
     def _on_throttle_timeout(self):
@@ -194,11 +200,12 @@ class SIVTimelineSlider(QSlider):
             if near_kf:
                 subj, kf = near_kf
                 t_s = float(kf.get("t", 0.0))
+                w_s = float(kf.get("window", 2.0))
                 lbl = "Pilota" if subj == "pilot" else "Vela"
                 time_str = f"{int(t_s)//60:02d}:{t_s%60:04.1f}"
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
-                    f"◆ <b>Keyframe {lbl}</b> ({time_str})<br><span style='color:#94a3b8; font-size:10px;'>Clicca col tasto destro per eliminare</span>",
+                    f"◆ <b>Keyframe {lbl}</b> ({time_str})<br>Finestra correzione: ±{w_s:.1f}s<br><span style='color:#94a3b8; font-size:10px;'>Clicca col tasto destro per eliminare</span>",
                     self
                 )
 
@@ -295,7 +302,33 @@ class SIVTimelineSlider(QSlider):
             painter.setBrush(QBrush(tick_color))
             painter.drawPolygon(pin)
 
-        # 4. Marker Keyframe di Tracciamento (Diamanti ◆)
+        # 4. Fasce delle Finestre di Correzione e Fade (Pilota / Vela)
+        for subject, base_rgb, border_col in [
+            ("wing", (245, 158, 11), QColor(245, 158, 11, 140)),
+            ("pilot", (6, 182, 212), QColor(6, 182, 212, 140))
+        ]:
+            for interval in self._correction_intervals.get(subject, []):
+                try:
+                    st_ms = int(float(interval.get("start", 0.0)) * 1000)
+                    en_ms = int(float(interval.get("end", 0.0)) * 1000)
+                except (ValueError, TypeError):
+                    continue
+                x_st = self._val_to_x(st_ms, track)
+                x_en = self._val_to_x(en_ms, track)
+                x_st = max(track.left(), min(track.right(), x_st))
+                x_en = max(track.left(), min(track.right(), x_en))
+                if x_en > x_st + 1:
+                    w_rect = QRect(x_st, track.top() - 1, x_en - x_st, track.height() + 2)
+                    r, g, b = base_rgb
+                    grad = QLinearGradient(x_st, 0, x_en, 0)
+                    grad.setColorAt(0.0, QColor(r, g, b, 20))
+                    grad.setColorAt(0.5, QColor(r, g, b, 90))
+                    grad.setColorAt(1.0, QColor(r, g, b, 20))
+                    painter.setPen(QPen(border_col, 1, Qt.PenStyle.DotLine))
+                    painter.setBrush(QBrush(grad))
+                    painter.drawRoundedRect(w_rect, 3.0, 3.0)
+
+        # 5. Marker Keyframe di Tracciamento (Diamanti ◆)
         for subject, color_hex in [("wing", "#f59e0b"), ("pilot", "#06b6d4")]:
             for kf in self._keyframes.get(subject, []):
                 try:

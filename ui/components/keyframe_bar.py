@@ -1,15 +1,17 @@
 from typing import Optional, Dict, Any
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QPushButton, QLabel, QFrame
+    QWidget, QHBoxLayout, QPushButton, QLabel, QFrame, QDoubleSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
 class KeyframeBar(QFrame):
     """
-    Barra di controllo compatta per la gestione dei keyframe di tracciamento:
+    Barra di controllo compatta per la gestione dei keyframe e finestre di correzione di tracciamento:
     - Selezione soggetto attivo (🔵 Pilota / 🟠 Vela)
     - Aggiunta manuale keyframe (+ KF o tasto K)
+    - Regolazione ampiezza finestra di correzione e fade (±X.X s)
+    - Creazione finestra di correzione localizzata (📐 Finestra)
     - Eliminazione keyframe corrente (🗑 o tasto Canc)
     - Navigazione rapida tra i keyframe (⏮ / ⏭ o Alt+Freccia)
     - Ripristino al tracciamento automatico originale
@@ -21,6 +23,8 @@ class KeyframeBar(QFrame):
     next_keyframe_requested = pyqtSignal()
     reset_keyframes_requested = pyqtSignal()
     active_subject_changed = pyqtSignal(str)
+    transition_window_changed = pyqtSignal(float)
+    create_window_requested = pyqtSignal(str, float)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -41,7 +45,7 @@ class KeyframeBar(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
         # Selettore Soggetto (Pilota / Vela)
         lbl_target = QLabel("Modifica:")
@@ -73,7 +77,7 @@ class KeyframeBar(QFrame):
         self.btn_wing.clicked.connect(lambda: self.set_active_subject("wing"))
         layout.addWidget(self.btn_wing)
 
-        layout.addSpacing(6)
+        layout.addSpacing(4)
 
         # Pulsanti Azione Keyframe
         self.btn_add = QPushButton("◆ + KF (K)")
@@ -87,6 +91,42 @@ class KeyframeBar(QFrame):
         """)
         self.btn_add.clicked.connect(lambda: self.add_keyframe_requested.emit(self._active_subject))
         layout.addWidget(self.btn_add)
+
+        # Selettore Finestra di Correzione e Fade
+        lbl_win = QLabel("Finestra:")
+        lbl_win.setStyleSheet("font-size: 11px; font-weight: 600; color: #94a3b8;")
+        layout.addWidget(lbl_win)
+
+        self.spin_window = QDoubleSpinBox()
+        self.spin_window.setRange(0.5, 10.0)
+        self.spin_window.setSingleStep(0.5)
+        self.spin_window.setValue(2.0)
+        self.spin_window.setPrefix("± ")
+        self.spin_window.setSuffix(" s")
+        self.spin_window.setDecimals(1)
+        self.spin_window.setToolTip("Ampiezza della finestra di correzione e fade in/out (secondi prima e dopo il keyframe)")
+        self.spin_window.setStyleSheet("""
+            QDoubleSpinBox {
+                font-size: 11px; font-weight: 700; padding: 3px 4px;
+                background-color: #131b2e; color: #38bdf8; border: 1px solid #334155; border-radius: 6px;
+            }
+            QDoubleSpinBox:hover { border-color: #0284c7; }
+        """)
+        self.spin_window.valueChanged.connect(self._on_window_value_changed)
+        layout.addWidget(self.spin_window)
+
+        # Pulsante Crea Finestra Correzione
+        self.btn_window = QPushButton("📐 Finestra")
+        self.btn_window.setToolTip("Crea o blocca una finestra di correzione al secondo corrente con l'ampiezza impostata")
+        self.btn_window.setStyleSheet("""
+            QPushButton {
+                font-size: 11px; font-weight: 600; padding: 4px 8px;
+                background-color: #131b2e; color: #a5f3fc; border: 1px solid #0891b2; border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #0e7490; color: #ffffff; }
+        """)
+        self.btn_window.clicked.connect(lambda: self.create_window_requested.emit(self._active_subject, self.transition_window))
+        layout.addWidget(self.btn_window)
 
         self.btn_del = QPushButton("🗑 Canc KF")
         self.btn_del.setToolTip("Elimina il keyframe al secondo corrente")
@@ -148,6 +188,20 @@ class KeyframeBar(QFrame):
     @property
     def active_subject(self) -> str:
         return self._active_subject
+
+    @property
+    def transition_window(self) -> float:
+        return float(self.spin_window.value())
+
+    def set_transition_window(self, window: float):
+        """Imposta il valore del selettore finestra senza scatenare segnali ridondanti."""
+        val = max(0.5, min(10.0, float(window)))
+        self.spin_window.blockSignals(True)
+        self.spin_window.setValue(val)
+        self.spin_window.blockSignals(False)
+
+    def _on_window_value_changed(self, value: float):
+        self.transition_window_changed.emit(float(value))
 
     def set_active_subject(self, subject: str):
         if subject in ("pilot", "wing") and subject != self._active_subject:
